@@ -106,7 +106,7 @@ def tilt_position(
     gamma = math.radians(gamma_deg)
 
     cos_gamma = math.cos(gamma)
-    if cos_gamma == 0.0:
+    if abs(cos_gamma) < 1e-9:
         return 100.0
 
     beta = math.atan(math.tan(sol_elev) / cos_gamma)
