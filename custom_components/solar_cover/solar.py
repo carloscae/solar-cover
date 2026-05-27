@@ -58,9 +58,9 @@ class SolarEngine:
 
     def fov_window(
         self,
-        azimuth_deg: int,
-        fov_left: int,
-        fov_right: int,
+        azimuth_deg: float,
+        fov_left: float,
+        fov_right: float,
         date_: date,
     ) -> tuple[datetime | None, datetime | None]:
         """Return (entry_time, exit_time) when sun enters/exits the FOV today.
@@ -101,6 +101,6 @@ def _gamma(win_azimuth: float, sol_azimuth: float) -> float:
     return (win_azimuth - sol_azimuth + 180) % 360 - 180
 
 
-def _in_fov(gamma: float, fov_left: int, fov_right: int) -> bool:
+def _in_fov(gamma: float, fov_left: float, fov_right: float) -> bool:
     """Return True if gamma is within the field of view."""
     return gamma < fov_left and gamma > -fov_right
