@@ -1,0 +1,41 @@
+{
+  "config": {
+    "step": {
+      "integration": {
+        "title": "Solar Cover - Global Settings",
+        "description": "These settings apply to all cover zones. All fields are optional.",
+        "data": {
+          "weather_entity": "Weather entity",
+          "wind_threshold": "Wind speed threshold (m/s)",
+          "min_temp": "Minimum outdoor temperature (degrees C)",
+          "inactive_position": "Inactive position (%)",
+          "override_duration": "Manual override duration (minutes)"
+        }
+      },
+      "zone": {
+        "title": "Cover Zone",
+        "description": "Configure a group of covers that move together.",
+        "data": {
+          "cover_entities": "Cover entities",
+          "cover_type": "Cover type",
+          "azimuth": "Compass bearing (degrees)",
+          "fov_left": "Field of view - left (degrees)",
+          "fov_right": "Field of view - right (degrees)",
+          "elevation_threshold": "Elevation threshold (degrees)",
+          "window_height": "Window height (m)",
+          "glare_depth": "Glare protection depth (m)",
+          "attach_height": "Attachment height above floor (m)",
+          "awn_length": "Awning span length (m)",
+          "awn_angle": "Awning angle from horizontal (degrees)",
+          "slat_width": "Slat width (mm)",
+          "slat_spacing": "Slat spacing (mm)",
+          "tilt_range": "Tilt range"
+        }
+      }
+    },
+    "error": {
+      "spacing_exceeds_width": "Slat spacing must be less than or equal to slat width.",
+      "unknown": "Unexpected error. Check the logs."
+    }
+  }
+}
