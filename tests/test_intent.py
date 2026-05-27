@@ -1,11 +1,12 @@
 """Unit tests for intent.py -- no HA needed."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 import pytest
 
-from custom_components.solar_cover.const import Intent
+from custom_components.solar_cover.const import CoverType, Intent, TiltRange
 from custom_components.solar_cover.intent import IntentInput, evaluate_intent
 
 
@@ -122,3 +123,36 @@ class TestShadingIntent:
         inp = IntentInput(**{**base_input.__dict__, "sol_azimuth_deg": 225.0})
         intent, _ = evaluate_intent(inp)
         assert intent == Intent.SHADING
+
+    def test_horizontal_cover_type_returns_position(
+        self, base_input: IntentInput
+    ) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "cover_type": CoverType.HORIZONTAL,
+                "attach_height": 2.5,
+                "awn_length": 3.0,
+                "awn_angle_deg": 15.0,
+                "glare_depth": 0.5,
+            }
+        )
+        intent, position = evaluate_intent(inp)
+        assert intent == Intent.SHADING
+        assert position is not None
+        assert 0.0 <= position <= 100.0
+
+    def test_tilt_cover_type_returns_position(self, base_input: IntentInput) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "cover_type": CoverType.TILT,
+                "slat_width_mm": 80.0,
+                "slat_spacing_mm": 50.0,
+                "tilt_range": TiltRange.SINGLE,
+            }
+        )
+        intent, position = evaluate_intent(inp)
+        assert intent == Intent.SHADING
+        assert position is not None
+        assert 0.0 <= position <= 100.0

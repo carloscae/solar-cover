@@ -1,4 +1,5 @@
 """Unit tests for geometry.py -- pure functions, no HA needed."""
+
 import pytest
 
 from custom_components.solar_cover.geometry import (
@@ -40,6 +41,13 @@ class TestVerticalPosition:
             sol_elev_deg=1.0, gamma_deg=0.0, distance=0.1, h_win=2.5
         )
         assert 0.0 <= result <= 100.0
+
+    def test_gamma_above_90_returns_100(self) -> None:
+        # gamma > 90 deg triggers the cos_gamma <= 0 guard directly
+        result = vertical_position(
+            sol_elev_deg=30.0, gamma_deg=91.0, distance=1.0, h_win=2.0
+        )
+        assert result == 100.0
 
 
 class TestHorizontalPosition:
@@ -94,6 +102,18 @@ class TestHorizontalPosition:
             distance=5.0,
         )
         assert 0.0 <= result <= 100.0
+
+    def test_zero_c_angle_returns_0(self) -> None:
+        # sol_elev=0 + awn_angle=0 -> c_angle=0 -> sin(c_angle)=0.0 -> return 0.0
+        result = horizontal_position(
+            sol_elev_deg=0.0,
+            gamma_deg=0.0,
+            h_win=2.5,
+            awn_length=3.0,
+            awn_angle_deg=0.0,
+            distance=1.0,
+        )
+        assert result == 0.0
 
 
 class TestTiltPosition:
@@ -150,3 +170,14 @@ class TestTiltPosition:
             bidirectional=False,
         )
         assert 0.0 <= result <= 100.0
+
+    def test_gamma_90_returns_100(self) -> None:
+        # gamma=90 deg exactly -> cos_gamma ~= 6e-17, abs < 1e-9 guard fires -> 100%
+        result = tilt_position(
+            sol_elev_deg=30.0,
+            gamma_deg=90.0,
+            slat_width_mm=80.0,
+            slat_spacing_mm=50.0,
+            bidirectional=False,
+        )
+        assert result == 100.0
