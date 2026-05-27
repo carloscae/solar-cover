@@ -1,0 +1,26 @@
+# Agent orchestration state — local only
+.agent/
+bootstrap-governance.sh
+
+# Internal project management — local only
+docs/sprints/
+docs/handoffs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
