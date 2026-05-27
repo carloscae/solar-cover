@@ -16,6 +16,7 @@
         "title": "Cover Zone",
         "description": "Configure a group of covers that move together.",
         "data": {
+          "name": "Zone name",
           "cover_entities": "Cover entities",
           "cover_type": "Cover type",
           "azimuth": "Compass bearing (degrees)",
