@@ -21,7 +21,7 @@
       },
       "zone_basic": {
         "title": "Add a Cover Zone",
-        "description": "Name this zone and point it at your window. Hold your phone flat against the glass to read the compass bearing.",
+        "description": "Name this zone and point it at your window. Hold your phone flat against the glass to read the compass bearing. If you choose Awning or Venetian Blind, a second screen will ask for the specific dimensions.",
         "data": {
           "name": "Zone name",
           "cover_entities": "Cover devices",

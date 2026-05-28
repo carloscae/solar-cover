@@ -167,7 +167,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME): selector.TextSelector(),
-                vol.Required(CONF_COVER_ENTITIES): selector.EntitySelector(
+                vol.Optional(CONF_COVER_ENTITIES, default=[]): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover", multiple=True)
                 ),
                 vol.Required(CONF_COVER_TYPE): selector.SelectSelector(
