@@ -6,6 +6,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.const import CONF_NAME
 from homeassistant.helpers import selector
 from homeassistant.helpers.selector import NumberSelectorMode
 
@@ -100,7 +101,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         max=30,
                         step=1,
                         mode=NumberSelectorMode.BOX,
-                        unit_of_measurement="C",
+                        unit_of_measurement="°C",
                     )
                 ),
                 vol.Optional(
@@ -133,8 +134,6 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Collect name, cover entities, type, geometry basics, and window dims."""
-        self._zone_partial = {}
-
         if user_input is not None:
             self._zone_partial = dict(user_input)
             cover_type = user_input.get(CONF_COVER_TYPE)
@@ -144,10 +143,11 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_zone_tilt()
             return await self.async_step_zone_vertical()
 
+        self._zone_partial = {}
         auto_threshold = _auto_elevation_threshold(self.hass.config)
         schema = vol.Schema(
             {
-                vol.Required("name"): selector.TextSelector(),
+                vol.Required(CONF_NAME): selector.TextSelector(),
                 vol.Required(CONF_COVER_ENTITIES): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover", multiple=True)
                 ),
@@ -221,7 +221,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """No extra geometry for vertical blinds - create the entry immediately."""
-        title = str(self._zone_partial.get("name", "Cover Zone"))
+        title = str(self._zone_partial.get(CONF_NAME, "Cover Zone"))
         return self.async_create_entry(
             title=title,
             data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
@@ -233,7 +233,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         """Collect awning-specific dimensions."""
         if user_input is not None:
             self._zone_partial.update(user_input)
-            title = str(self._zone_partial.get("name", "Cover Zone"))
+            title = str(self._zone_partial.get(CONF_NAME, "Cover Zone"))
             return self.async_create_entry(
                 title=title,
                 data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
@@ -285,7 +285,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
             else:
                 self._zone_partial.update(user_input)
-                title = str(self._zone_partial.get("name", "Cover Zone"))
+                title = str(self._zone_partial.get(CONF_NAME, "Cover Zone"))
                 return self.async_create_entry(
                     title=title,
                     data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
