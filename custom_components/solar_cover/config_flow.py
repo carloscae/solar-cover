@@ -240,24 +240,6 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                     unit_of_measurement="deg",
                 )
             ),
-            vol.Optional(CONF_WINDOW_HEIGHT, default=2.5): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.5,
-                    max=5.0,
-                    step=0.1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="m",
-                )
-            ),
-            vol.Optional(CONF_GLARE_DEPTH, default=1.0): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.1,
-                    max=5.0,
-                    step=0.1,
-                    mode=NumberSelectorMode.BOX,
-                    unit_of_measurement="m",
-                )
-            ),
             vol.Optional(CONF_MIN_POSITION, default=0): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0,
@@ -277,7 +259,41 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             ),
         }
-        if cover_type == CoverType.HORIZONTAL:
+        if cover_type == CoverType.VERTICAL:
+            fields[vol.Optional(CONF_WINDOW_HEIGHT, default=2.5)] = (
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=5.0,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="m",
+                    )
+                )
+            )
+            fields[vol.Optional(CONF_GLARE_DEPTH, default=1.0)] = (
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=5.0,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="m",
+                    )
+                )
+            )
+        elif cover_type == CoverType.HORIZONTAL:
+            fields[vol.Optional(CONF_GLARE_DEPTH, default=1.0)] = (
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=5.0,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="m",
+                    )
+                )
+            )
             fields[vol.Optional(CONF_ATTACH_HEIGHT, default=2.5)] = (
                 selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -433,7 +449,7 @@ class ZoneOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Zone basics -- mirrors async_step_zone_basic."""
+        """Step 1: common fields + cover type selection. Routes to geometry step."""
         if user_input is not None:
             self._partial = dict(user_input)
             cover_type = CoverType(user_input[CONF_COVER_TYPE])
@@ -441,16 +457,13 @@ class ZoneOptionsFlow(OptionsFlow):
                 return await self.async_step_geometry_horizontal()
             if cover_type == CoverType.TILT:
                 return await self.async_step_geometry_tilt()
-            # vertical -- done
-            return self.async_create_entry(
-                title="", data={**self._entry.data, **self._partial}
-            )
+            return await self.async_step_geometry_vertical()
 
         data = {**self._entry.data, **self._entry.options}
         auto_threshold = _auto_elevation_threshold(self.hass.config)
         schema = vol.Schema(
             {
-                vol.Required(
+                vol.Optional(
                     CONF_COVER_ENTITIES, default=data.get(CONF_COVER_ENTITIES, [])
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="cover", multiple=True)
@@ -510,6 +523,45 @@ class ZoneOptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Optional(
+                    CONF_MIN_POSITION, default=data.get(CONF_MIN_POSITION, 0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
+                    )
+                ),
+                vol.Optional(
+                    CONF_MAX_POSITION, default=data.get(CONF_MAX_POSITION, 100)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
+
+    async def async_step_geometry_vertical(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect vertical blind dimensions (window height + shade depth)."""
+        if user_input is not None:
+            self._partial.update(user_input)
+            return self.async_create_entry(
+                title="", data={**self._entry.data, **self._partial}
+            )
+
+        data = {**self._entry.data, **self._entry.options}
+        schema = vol.Schema(
+            {
+                vol.Optional(
                     CONF_WINDOW_HEIGHT, default=data.get(CONF_WINDOW_HEIGHT, 2.5)
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -531,27 +583,9 @@ class ZoneOptionsFlow(OptionsFlow):
                         unit_of_measurement="m",
                     )
                 ),
-                vol.Optional(CONF_MIN_POSITION, default=0): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=100,
-                        step=1,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="%",
-                    )
-                ),
-                vol.Optional(CONF_MAX_POSITION, default=100): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=100,
-                        step=1,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="%",
-                    )
-                ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="geometry_vertical", data_schema=schema)
 
     async def async_step_geometry_horizontal(
         self, user_input: dict[str, Any] | None = None
@@ -566,6 +600,17 @@ class ZoneOptionsFlow(OptionsFlow):
         data = {**self._entry.data, **self._entry.options}
         schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_GLARE_DEPTH, default=data.get(CONF_GLARE_DEPTH, 1.0)
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=5.0,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="m",
+                    )
+                ),
                 vol.Optional(
                     CONF_ATTACH_HEIGHT, default=data.get(CONF_ATTACH_HEIGHT, 2.5)
                 ): selector.NumberSelector(

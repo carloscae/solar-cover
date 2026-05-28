@@ -35,7 +35,7 @@
       },
       "zone_configure": {
         "title": "Zone Settings",
-        "description": "Configure the window geometry and position limits for this zone.",
+        "description": "Configure the geometry and position limits for this zone. Only the fields relevant to your cover type are shown.",
         "data": {
           "azimuth": "Window compass bearing",
           "fov_left": "How far left the sun shines in",
@@ -117,15 +117,29 @@
           "max_position": "The cover will never go above this position while shading. Set to 80% if you always want some view through the window."
         }
       },
+      "geometry_vertical": {
+        "title": "Blind Dimensions",
+        "description": "Enter the window size and how far into the room you want to keep free of direct sunlight.",
+        "data": {
+          "window_height": "Window height",
+          "glare_depth": "How far into the room to shade"
+        },
+        "data_description": {
+          "window_height": "The height of the glass area from floor to top, in metres.",
+          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres."
+        }
+      },
       "geometry_horizontal": {
         "title": "Awning Settings",
-        "description": "Enter the physical dimensions of your awning.",
+        "description": "Enter the physical dimensions of your awning and how far under it you want to stay in shade.",
         "data": {
+          "glare_depth": "How far under the awning to shade",
           "attach_height": "Height of awning rail above floor",
           "awn_length": "Maximum reach when fully extended",
           "awn_angle": "Awning slope angle"
         },
         "data_description": {
+          "glare_depth": "How far back from the facade you want to keep free of direct sunlight, in metres. The awning will extend only as much as needed to reach this depth.",
           "attach_height": "Height of the awning rail above the floor (metres).",
           "awn_length": "Maximum horizontal projection of the awning when fully extended (metres).",
           "awn_angle": "Downward angle of the awning from horizontal (degrees). Typical: 10-20°."

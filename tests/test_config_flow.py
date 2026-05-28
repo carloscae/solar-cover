@@ -37,25 +37,31 @@ ZONE_STEP1_VERTICAL = {
     CONF_COVER_TYPE: CoverType.VERTICAL,
 }
 
-# Step 2: geometry fields (common to all types)
-ZONE_STEP2_COMMON = {
+# Geometry fields shared by all cover types in zone_configure step
+_ZONE_STEP2_BASE = {
     CONF_AZIMUTH: 180,
     CONF_FOV_LEFT: 90,
     CONF_FOV_RIGHT: 90,
     CONF_ELEVATION_THRESHOLD: 27.0,
+}
+
+# Each cover type gets only the fields its formula actually uses
+ZONE_STEP2_VERTICAL = {
+    **_ZONE_STEP2_BASE,
     CONF_WINDOW_HEIGHT: 2.5,
     CONF_GLARE_DEPTH: 1.0,
 }
 
 ZONE_STEP2_HORIZONTAL = {
-    **ZONE_STEP2_COMMON,
+    **_ZONE_STEP2_BASE,
+    CONF_GLARE_DEPTH: 1.0,
     CONF_ATTACH_HEIGHT: 2.5,
     CONF_AWN_LENGTH: 3.0,
     CONF_AWN_ANGLE: 15,
 }
 
 ZONE_STEP2_TILT = {
-    **ZONE_STEP2_COMMON,
+    **_ZONE_STEP2_BASE,
     CONF_SLAT_WIDTH: 80.0,
     CONF_SLAT_SPACING: 50.0,
     CONF_TILT_RANGE: TiltRange.SINGLE,
@@ -178,7 +184,7 @@ class TestZoneConfigureStep:
                 result["flow_id"], user_input=ZONE_STEP1_VERTICAL
             )
             result3 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=ZONE_STEP2_COMMON
+                result["flow_id"], user_input=ZONE_STEP2_VERTICAL
             )
         assert result3["type"] == FlowResultType.CREATE_ENTRY
         assert result3["data"]["entry_type"] == ENTRY_TYPE_ZONE
@@ -248,7 +254,7 @@ class TestZoneConfigureStep:
             result["flow_id"], user_input=step1
         )
         bad_tilt = {
-            **ZONE_STEP2_COMMON,
+            **_ZONE_STEP2_BASE,
             CONF_SLAT_WIDTH: 50.0,
             CONF_SLAT_SPACING: 60.0,  # spacing > width -- should fail
             CONF_TILT_RANGE: TiltRange.SINGLE,
