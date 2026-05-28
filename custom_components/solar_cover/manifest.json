@@ -1,7 +1,7 @@
 {
   "domain": "solar_cover",
   "name": "Solar Cover",
-  "version": "0.2.0",
+  "version": "0.2.6",
   "config_flow": true,
   "documentation": "https://github.com/carloscae/solar-cover",
   "issue_tracker": "https://github.com/carloscae/solar-cover/issues",
