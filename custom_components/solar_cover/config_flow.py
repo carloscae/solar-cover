@@ -232,7 +232,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="m",
                     )
                 ),
-                vol.Optional(CONF_MIN_POSITION): selector.NumberSelector(
+                vol.Optional(CONF_MIN_POSITION, default=0): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
                         max=100,
@@ -241,7 +241,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="%",
                     )
                 ),
-                vol.Optional(CONF_MAX_POSITION): selector.NumberSelector(
+                vol.Optional(CONF_MAX_POSITION, default=100): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
                         max=100,
@@ -551,7 +551,7 @@ class ZoneOptionsFlow(OptionsFlow):
                         unit_of_measurement="m",
                     )
                 ),
-                vol.Optional(CONF_MIN_POSITION): selector.NumberSelector(
+                vol.Optional(CONF_MIN_POSITION, default=0): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
                         max=100,
@@ -560,7 +560,7 @@ class ZoneOptionsFlow(OptionsFlow):
                         unit_of_measurement="%",
                     )
                 ),
-                vol.Optional(CONF_MAX_POSITION): selector.NumberSelector(
+                vol.Optional(CONF_MAX_POSITION, default=100): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
                         max=100,
