@@ -13,6 +13,7 @@ from typing import Any
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
@@ -91,6 +92,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         zone_data: dict[str, Any],
         integration_data: dict[str, Any],
         solar_engine: SolarEngine,
+        entry_id: str = "",
     ) -> None:
         super().__init__(
             hass,
@@ -103,8 +105,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._solar = solar_engine
         self._last_commanded: float | None = None
         self._last_intent: Intent | None = None
+        self._enabled: bool = True
         self._manual_override_until: datetime | None = None
         self._unsub_weather: Any = None
+        self._store: Store = Store(hass, 1, f"solar_cover.{entry_id}")
 
         weather_entity = integration_data.get(CONF_WEATHER_ENTITY)
         if weather_entity:
@@ -115,6 +119,22 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
     @callback
     def _on_weather_change(self, event: Any) -> None:
         self.hass.async_create_task(self.async_request_refresh())
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether automation is active for this zone."""
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable automation. Triggers an immediate coordinator refresh."""
+        self._enabled = enabled
+        self.hass.async_create_task(self.async_request_refresh())
+
+    async def async_restore_state(self) -> None:
+        """Load persisted last-commanded position from storage."""
+        data = await self._store.async_load()
+        if data and "last_commanded" in data:
+            self._last_commanded = float(data["last_commanded"])
 
     async def _async_update_data(self) -> CoordinatorData:
         now = datetime.now(tz=UTC)
@@ -202,9 +222,20 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._last_intent = intent
         last = self._last_commanded
         delta: float | None = abs(clamped - last) if last is not None else None
-        if delta is None or delta >= hysteresis or intent_changed:
+
+        # Only command covers when: automation enabled, sun is above the horizon,
+        # and either intent changed or the position shift exceeds hysteresis.
+        # Suppressing commands below the horizon prevents an HA restart at night
+        # from re-opening covers the user closed manually.
+        above_horizon = sol_el > 0
+        if (
+            self._enabled
+            and above_horizon
+            and (delta is None or delta >= hysteresis or intent_changed)
+        ):
             await self._command_covers(clamped)
             self._last_commanded = clamped
+            await self._store.async_save({"last_commanded": clamped})
 
         commanded: float = (
             self._last_commanded if self._last_commanded is not None else clamped

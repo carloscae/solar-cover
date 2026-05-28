@@ -166,6 +166,11 @@
     }
   },
   "entity": {
+    "switch": {
+      "automation_enabled": {
+        "name": "Automation active"
+      }
+    },
     "sensor": {
       "intent": {
         "name": "Active intent",
