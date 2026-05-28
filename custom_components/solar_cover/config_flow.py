@@ -353,7 +353,7 @@ class IntegrationOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        data = self._entry.data
+        data = {**self._entry.data, **self._entry.options}
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -435,7 +435,6 @@ class ZoneOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Zone basics -- mirrors async_step_zone_basic."""
-        errors: dict[str, str] = {}
         if user_input is not None:
             self._partial = dict(user_input)
             cover_type = CoverType(user_input[CONF_COVER_TYPE])
@@ -448,7 +447,7 @@ class ZoneOptionsFlow(OptionsFlow):
                 title="", data={**self._entry.data, **self._partial}
             )
 
-        data = self._entry.data
+        data = {**self._entry.data, **self._entry.options}
         auto_threshold = _auto_elevation_threshold(self.hass.config)
         schema = vol.Schema(
             {
@@ -535,7 +534,7 @@ class ZoneOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="init", data_schema=schema)
 
     async def async_step_geometry_horizontal(
         self, user_input: dict[str, Any] | None = None
@@ -547,7 +546,7 @@ class ZoneOptionsFlow(OptionsFlow):
                 title="", data={**self._entry.data, **self._partial}
             )
 
-        data = self._entry.data
+        data = {**self._entry.data, **self._entry.options}
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -603,7 +602,7 @@ class ZoneOptionsFlow(OptionsFlow):
                     title="", data={**self._entry.data, **self._partial}
                 )
 
-        data = self._entry.data
+        data = {**self._entry.data, **self._entry.options}
         schema = vol.Schema(
             {
                 vol.Optional(
