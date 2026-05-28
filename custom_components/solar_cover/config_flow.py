@@ -29,6 +29,8 @@ from .const import (
     CONF_GLARE_DEPTH,
     CONF_HYSTERESIS,
     CONF_INACTIVE_POSITION,
+    CONF_MAX_POSITION,
+    CONF_MIN_POSITION,
     CONF_MIN_TEMP,
     CONF_OVERRIDE_DURATION,
     CONF_SLAT_SPACING,
@@ -228,6 +230,24 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         step=0.1,
                         mode=NumberSelectorMode.BOX,
                         unit_of_measurement="m",
+                    )
+                ),
+                vol.Optional(CONF_MIN_POSITION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
+                    )
+                ),
+                vol.Optional(CONF_MAX_POSITION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
                     )
                 ),
             }
@@ -529,6 +549,24 @@ class ZoneOptionsFlow(OptionsFlow):
                         step=0.1,
                         mode=NumberSelectorMode.BOX,
                         unit_of_measurement="m",
+                    )
+                ),
+                vol.Optional(CONF_MIN_POSITION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
+                    )
+                ),
+                vol.Optional(CONF_MAX_POSITION): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
                     )
                 ),
             }

@@ -31,7 +31,9 @@
           "fov_right": "How far right the sun shines in",
           "elevation_threshold": "Minimum sun height to activate",
           "window_height": "Window height",
-          "glare_depth": "How far into the room to shade"
+          "glare_depth": "How far into the room to shade",
+          "min_position": "Minimum shading position",
+          "max_position": "Maximum shading position"
         },
         "data_description": {
           "name": "A short label for this zone, for example: Living room south.",
@@ -42,7 +44,9 @@
           "fov_right": "How many degrees to the right of the window center the sun can still shine in. Start with 90 and reduce it if a wall or obstacle blocks part of the view.",
           "elevation_threshold": "The covers only deploy when the sun is at least this many degrees above the horizon. Pre-filled based on your location - you can raise it to ignore a low winter sun.",
           "window_height": "The height of the glass area from floor to top, in metres.",
-          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres."
+          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres.",
+          "min_position": "The cover will never go below this position while shading. Set to 30% to always keep some daylight in.",
+          "max_position": "The cover will never go above this position while shading. Set to 80% if you always want some view through the window."
         }
       },
       "zone_vertical": {
@@ -104,7 +108,9 @@
           "fov_right": "How far right the sun shines in",
           "elevation_threshold": "Minimum sun height to activate",
           "window_height": "Window height",
-          "glare_depth": "How far into the room to shade"
+          "glare_depth": "How far into the room to shade",
+          "min_position": "Minimum shading position",
+          "max_position": "Maximum shading position"
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
@@ -120,7 +126,9 @@
           "fov_right": "Degrees right of center where the sun last hits this window. Start with 90.",
           "elevation_threshold": "Covers only deploy when the sun is above this angle (°).",
           "window_height": "Floor-to-ceiling height of the glazed area in metres.",
-          "glare_depth": "How far into the room you want to keep shaded (metres)."
+          "glare_depth": "How far into the room you want to keep shaded (metres).",
+          "min_position": "The cover will never go below this position while shading. Set to 30% to always keep some daylight in.",
+          "max_position": "The cover will never go above this position while shading. Set to 80% if you always want some view through the window."
         }
       },
       "geometry_horizontal": {
