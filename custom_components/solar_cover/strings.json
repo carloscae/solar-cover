@@ -89,6 +89,7 @@
     "step": {
       "init": {
         "title": "Edit Settings",
+        "description": "Update the settings below and press Submit to apply changes.",
         "data": {
           "weather_entity": "Weather entity",
           "wind_threshold": "Retract covers in strong wind",
@@ -124,6 +125,7 @@
       },
       "geometry_horizontal": {
         "title": "Awning Settings",
+        "description": "Enter the physical dimensions of your awning.",
         "data": {
           "attach_height": "Height of awning rail above floor",
           "awn_length": "Maximum reach when fully extended",
@@ -137,6 +139,7 @@
       },
       "geometry_tilt": {
         "title": "Venetian Blind Settings",
+        "description": "Enter the slat dimensions for the tilt calculation.",
         "data": {
           "slat_width": "Slat width",
           "slat_spacing": "Gap between slats",
