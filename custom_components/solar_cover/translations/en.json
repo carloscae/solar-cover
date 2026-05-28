@@ -84,5 +84,94 @@
       "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
       "unknown": "Unexpected error. Check the logs."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit Settings",
+        "data": {
+          "weather_entity": "Weather entity",
+          "wind_threshold": "Retract covers in strong wind",
+          "min_temp": "Minimum outdoor temperature",
+          "inactive_position": "Rest position when sun is not active",
+          "override_duration": "How long manual adjustments last",
+          "hysteresis": "Minimum position change to move covers",
+          "cover_entities": "Cover devices",
+          "cover_type": "Cover type",
+          "azimuth": "Window compass bearing",
+          "fov_left": "How far left the sun shines in",
+          "fov_right": "How far right the sun shines in",
+          "elevation_threshold": "Minimum sun height to activate",
+          "window_height": "Window height",
+          "glare_depth": "How far into the room to shade"
+        },
+        "data_description": {
+          "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
+          "wind_threshold": "Covers retract automatically when wind exceeds this speed (m/s).",
+          "min_temp": "Covers stay retracted below this temperature to let in warmth (°C).",
+          "inactive_position": "Position (0-100%) when the sun is not hitting the window.",
+          "override_duration": "After you move a cover manually, automation stays paused for this many minutes.",
+          "hysteresis": "Only move covers when the new position differs by at least this percentage. Prevents motor chatter. Default: 3%.",
+          "cover_entities": "The cover devices that move together in this zone.",
+          "cover_type": "The physical type of cover determines which geometry is used.",
+          "azimuth": "Compass direction your window faces (0=North, 90=East, 180=South, 270=West).",
+          "fov_left": "Degrees left of center where the sun first hits this window. Start with 90.",
+          "fov_right": "Degrees right of center where the sun last hits this window. Start with 90.",
+          "elevation_threshold": "Covers only deploy when the sun is above this angle (°).",
+          "window_height": "Floor-to-ceiling height of the glazed area in metres.",
+          "glare_depth": "How far into the room you want to keep shaded (metres)."
+        }
+      },
+      "geometry_horizontal": {
+        "title": "Awning Settings",
+        "data": {
+          "attach_height": "Height of awning rail above floor",
+          "awn_length": "Maximum reach when fully extended",
+          "awn_angle": "Awning slope angle"
+        },
+        "data_description": {
+          "attach_height": "Height of the awning rail above the floor (metres).",
+          "awn_length": "Maximum horizontal projection of the awning when fully extended (metres).",
+          "awn_angle": "Downward angle of the awning from horizontal (degrees). Typical: 10-20°."
+        }
+      },
+      "geometry_tilt": {
+        "title": "Venetian Blind Settings",
+        "data": {
+          "slat_width": "Slat width",
+          "slat_spacing": "Gap between slats",
+          "tilt_range": "Tilt range"
+        },
+        "data_description": {
+          "slat_width": "Width of each slat in millimetres.",
+          "slat_spacing": "The distance from the center of one slat to the center of the next, in millimetres. Must be less than or equal to slat width.",
+          "tilt_range": "Single: slats tilt from fully open to fully closed (0-90°). Bidirectional: slats can also tilt past horizontal in both directions."
+        }
+      }
+    },
+    "error": {
+      "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
+      "unknown": "Unexpected error. Check the logs."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "intent": {
+        "name": "Active intent",
+        "state": {
+          "shading": "Shading",
+          "inactive_sun_low": "Sun too low",
+          "inactive_outside_fov": "Sun outside window",
+          "inactive_weather": "Retracted - weather",
+          "manual_override": "Manual override"
+        }
+      },
+      "sun_elevation": { "name": "Sun elevation" },
+      "sun_azimuth": { "name": "Sun azimuth" },
+      "surface_azimuth": { "name": "Sun angle to window" },
+      "computed_position": { "name": "Calculated position" },
+      "fov_entry": { "name": "Sun enters window" },
+      "fov_exit": { "name": "Sun leaves window" }
+    }
   }
 }

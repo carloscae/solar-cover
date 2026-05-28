@@ -3,6 +3,7 @@
 Runs on a 5-minute timer and on weather entity state_changed events.
 Computes sun position, evaluates intent, applies hysteresis, commands entities.
 """
+
 from __future__ import annotations
 
 import logging
@@ -129,7 +130,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         if weather_state and weather_state.state not in ("unavailable", "unknown"):
             raining = weather_state.state in (
-                "rainy", "pouring", "snowy", "lightning-rainy"
+                "rainy",
+                "pouring",
+                "snowy",
+                "lightning-rainy",
             )
             attrs = weather_state.attributes
             wind_speed = attrs.get("wind_speed")
@@ -171,7 +175,8 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._integration.get(CONF_INACTIVE_POSITION, DEFAULT_INACTIVE_POSITION),
         )
         raw_position: float = (
-            computed_pos if intent == Intent.SHADING and computed_pos is not None
+            computed_pos
+            if intent == Intent.SHADING and computed_pos is not None
             else float(inactive_pos)
         )
 
@@ -185,7 +190,12 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             clamped = min(clamped, float(max_pos))
 
         # Apply hysteresis -- only command if delta exceeds threshold
-        hysteresis = float(self._zone.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS))
+        hysteresis = float(
+            self._zone.get(
+                CONF_HYSTERESIS,
+                self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
+            )
+        )
         last = self._last_commanded
         delta: float | None = abs(clamped - last) if last is not None else None
         if delta is None or delta >= hysteresis:

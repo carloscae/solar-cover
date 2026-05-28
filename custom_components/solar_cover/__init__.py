@@ -1,4 +1,5 @@
 """Solar Cover integration."""
+
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,7 +13,7 @@ from .const import (
 from .coordinator import SolarCoverCoordinator
 from .solar import SolarEngine
 
-PLATFORMS_ZONE = ["cover"]
+PLATFORMS_ZONE = ["cover", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -21,11 +22,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_type = entry.data.get("entry_type", ENTRY_TYPE_ZONE)
 
     if entry_type == ENTRY_TYPE_INTEGRATION:
-        hass.data[DOMAIN]["integration"] = dict(entry.data)
+        integration_data = {**entry.data, **entry.options}
+        hass.data[DOMAIN]["integration"] = integration_data
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
 
     # Zone entry
     integration_data = hass.data[DOMAIN].get("integration", {})
+    zone_data = {**entry.data, **entry.options}
     solar = SolarEngine(
         lat=hass.config.latitude,
         lon=hass.config.longitude,
@@ -34,7 +38,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = SolarCoverCoordinator(
         hass=hass,
-        zone_data=dict(entry.data),
+        zone_data=zone_data,
         integration_data=integration_data,
         solar_engine=solar,
     )
@@ -42,6 +46,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN]["coordinators"][entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ZONE)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
@@ -56,3 +61,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         hass.data[DOMAIN]["coordinators"].pop(entry.entry_id, None)
     return unloaded
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
