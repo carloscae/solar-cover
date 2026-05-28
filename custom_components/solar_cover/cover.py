@@ -1,4 +1,5 @@
 """Solar Cover entity -- reads coordinator state, exposes observability attributes."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -29,9 +31,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Solar Cover entities from a config entry."""
-    coordinator: SolarCoverCoordinator = (
-        hass.data[DOMAIN]["coordinators"][entry.entry_id]
-    )
+    coordinator: SolarCoverCoordinator = hass.data[DOMAIN]["coordinators"][
+        entry.entry_id
+    ]
     integration_data: dict[str, Any] = hass.data[DOMAIN].get("integration", {})
     async_add_entities([SolarCoverEntity(coordinator, entry, integration_data)])
 
@@ -55,6 +57,11 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.title
         self._attr_device_class = CoverDeviceClass.BLIND
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="Solar Cover",
+        )
 
     @property
     def is_closed(self) -> bool | None:
