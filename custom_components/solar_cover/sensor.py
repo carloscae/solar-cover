@@ -77,7 +77,9 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         icon="mdi:percent",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: (
-            round(d.computed_position, 1) if d.computed_position is not None else None
+            round(d.computed_position, 1)
+            if d.computed_position is not None
+            else round(d.commanded_position, 1)
         ),
     ),
     SolarCoverSensorDescription(

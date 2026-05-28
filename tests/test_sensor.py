@@ -151,10 +151,12 @@ class TestSensorValueFunctions:
         result = self._get_desc("computed_position").value_fn(data)
         assert result == 73.5
 
-    def test_computed_position_returns_none_when_none(self) -> None:
-        data = _make_coordinator_data(computed_position=None)
+    def test_computed_position_falls_back_to_commanded_when_inactive(self) -> None:
+        # When the geometry didn't run (inactive intent), the sensor falls back to
+        # the commanded position so it never goes unavailable.
+        data = _make_coordinator_data(computed_position=None, commanded_position=0.0)
         result = self._get_desc("computed_position").value_fn(data)
-        assert result is None
+        assert result == 0.0
 
     def test_fov_entry_returns_datetime_object(self) -> None:
         data = _make_coordinator_data(fov_entry="2026-05-28T08:30:00+00:00")

@@ -102,6 +102,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._integration = integration_data
         self._solar = solar_engine
         self._last_commanded: float | None = None
+        self._last_intent: Intent | None = None
         self._manual_override_until: datetime | None = None
         self._unsub_weather: Any = None
 
@@ -180,25 +181,28 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             else float(inactive_pos)
         )
 
-        # Apply min/max clamp
+        # Apply min/max clamp -- only when shading; inactive rest position is unclamped
         min_pos = self._zone.get(CONF_MIN_POSITION)
         max_pos = self._zone.get(CONF_MAX_POSITION)
         clamped: float = raw_position
-        if min_pos is not None:
-            clamped = max(clamped, float(min_pos))
-        if max_pos is not None:
-            clamped = min(clamped, float(max_pos))
+        if intent == Intent.SHADING:
+            if min_pos is not None:
+                clamped = max(clamped, float(min_pos))
+            if max_pos is not None:
+                clamped = min(clamped, float(max_pos))
 
-        # Apply hysteresis -- only command if delta exceeds threshold
+        # Apply hysteresis -- skip only when intent is unchanged AND delta is small
         hysteresis = float(
             self._zone.get(
                 CONF_HYSTERESIS,
                 self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
             )
         )
+        intent_changed = intent != self._last_intent
+        self._last_intent = intent
         last = self._last_commanded
         delta: float | None = abs(clamped - last) if last is not None else None
-        if delta is None or delta >= hysteresis:
+        if delta is None or delta >= hysteresis or intent_changed:
             await self._command_covers(clamped)
             self._last_commanded = clamped
 
