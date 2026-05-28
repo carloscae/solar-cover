@@ -104,21 +104,33 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
             "position_curve": data.position_curve,
         }
 
-    async def async_set_cover_position(self, **kwargs: Any) -> None:
-        """Set a manual override; coordinator will refresh and re-evaluate intent."""
-        override_minutes = self._entry.data.get(
-            CONF_OVERRIDE_DURATION_OVERRIDE,
-            self._integration_data.get(
-                CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION
-            ),
+    @property
+    def _override_duration(self) -> int:
+        """Return the override duration in minutes from config."""
+        return int(
+            self._entry.data.get(
+                CONF_OVERRIDE_DURATION_OVERRIDE,
+                self._integration_data.get(
+                    CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION
+                ),
+            )
         )
-        until = datetime.now(tz=UTC) + timedelta(minutes=int(override_minutes))
+
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
+        """Set a manual override and immediately command the physical covers."""
+        position: float = kwargs.get("position", 0)
+        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
         self.coordinator.set_manual_override(until)
+        await self.coordinator._command_covers(position)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
-        """Open the cover by triggering a manual override."""
-        await self.async_set_cover_position(position=100)
+        """Open the cover fully and set a manual override."""
+        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
+        self.coordinator.set_manual_override(until)
+        await self.coordinator._command_covers(100)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
-        """Close the cover by triggering a manual override."""
-        await self.async_set_cover_position(position=0)
+        """Close the cover fully and set a manual override."""
+        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
+        self.coordinator.set_manual_override(until)
+        await self.coordinator._command_covers(0)
