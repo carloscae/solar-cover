@@ -55,7 +55,6 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
         self._entry = entry
         self._integration_data = integration_data
         self._attr_unique_id = entry.entry_id
-        self._attr_name = entry.title
         self._attr_device_class = CoverDeviceClass.BLIND
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
