@@ -58,7 +58,7 @@
           "fov_right": "How many degrees to the right of the window center the sun can still shine in. Start with 90 and reduce if a wall blocks part of the view.",
           "elevation_threshold": "Covers only deploy when the sun is at least this many degrees above the horizon. Pre-filled from your location.",
           "window_height": "The height of the glass area from floor to top, in metres.",
-          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres.",
+          "glare_depth": "For blinds: how far into the room to keep free of direct sunlight, in metres. For awnings: how far out onto the terrace the shadow should reach, in metres.",
           "min_position": "The cover will never go below this position while shading. Set to 30% to always keep some daylight in.",
           "max_position": "The cover will never go above this position while shading. Set to 80% to always keep some view.",
           "attach_height": "How high above the floor the awning rail is mounted, in metres.",
@@ -126,20 +126,20 @@
         },
         "data_description": {
           "window_height": "The height of the glass area from floor to top, in metres.",
-          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres."
+          "glare_depth": "How far from the window you want to keep free of direct sunlight, in metres. A desk 1.5 m from the window would need at least 1.5 m here."
         }
       },
       "geometry_horizontal": {
         "title": "Awning Settings",
-        "description": "Enter the physical dimensions of your awning and how far under it you want to stay in shade.",
+        "description": "Enter the physical dimensions of your awning and how far out onto the terrace you want to keep in shade.",
         "data": {
-          "glare_depth": "How far under the awning to shade",
+          "glare_depth": "How far out onto the terrace to shade",
           "attach_height": "Height of awning rail above floor",
           "awn_length": "Maximum reach when fully extended",
           "awn_angle": "Awning slope angle"
         },
         "data_description": {
-          "glare_depth": "How far back from the facade you want to keep free of direct sunlight, in metres. The awning will extend only as much as needed to reach this depth.",
+          "glare_depth": "The awning extends until its shadow reaches this far from the wall, in metres. If your outdoor table sits 3 m from the wall, set this to 3 m.",
           "attach_height": "Height of the awning rail above the floor (metres).",
           "awn_length": "Maximum horizontal projection of the awning when fully extended (metres).",
           "awn_angle": "Downward angle of the awning from horizontal (degrees). Typical: 10-20°."
