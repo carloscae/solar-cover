@@ -2,6 +2,7 @@
 
 No HA imports permitted. Uses hass.config values passed in at construction time.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
@@ -76,8 +77,8 @@ class SolarEngine:
 
         for i, sample in enumerate(samples):
             gamma = _gamma(azimuth_deg, sample["azimuth"])
-            currently_in = (
-                sample["elevation"] > 0 and _in_fov(gamma, fov_left, fov_right)
+            currently_in = sample["elevation"] > 0 and _in_fov(
+                gamma, fov_left, fov_right
             )
             dt = start + timedelta(minutes=i * 5)
 

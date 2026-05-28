@@ -1,4 +1,5 @@
 """Unit tests for solar.py -- uses real astral library, no HA needed."""
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
@@ -20,7 +21,7 @@ class TestSunPosition:
         dt = datetime(2026, 6, 21, 11, 0, tzinfo=UTC)
         az, el = vienna_engine.sun_position(dt)
         assert 160 < az < 200  # roughly south
-        assert 60 < el < 70    # high elevation in summer
+        assert 60 < el < 70  # high elevation in summer
 
     def test_winter_noon_low_elevation(self, vienna_engine: SolarEngine) -> None:
         # 2026-12-21 11:00 UTC = ~12:00 Vienna time

@@ -30,10 +30,15 @@ from custom_components.solar_cover.const import (
     TiltRange,
 )
 
-ZONE_BASIC_INPUT = {
+# Step 1: name, entities, cover type
+ZONE_STEP1_VERTICAL = {
     "name": "South Terrace",
     CONF_COVER_ENTITIES: ["cover.terrace_awning"],
     CONF_COVER_TYPE: CoverType.VERTICAL,
+}
+
+# Step 2: geometry fields (common to all types)
+ZONE_STEP2_COMMON = {
     CONF_AZIMUTH: 180,
     CONF_FOV_LEFT: 90,
     CONF_FOV_RIGHT: 90,
@@ -42,13 +47,15 @@ ZONE_BASIC_INPUT = {
     CONF_GLARE_DEPTH: 1.0,
 }
 
-HORIZONTAL_INPUT = {
+ZONE_STEP2_HORIZONTAL = {
+    **ZONE_STEP2_COMMON,
     CONF_ATTACH_HEIGHT: 2.5,
     CONF_AWN_LENGTH: 3.0,
     CONF_AWN_ANGLE: 15,
 }
 
-TILT_INPUT = {
+ZONE_STEP2_TILT = {
+    **ZONE_STEP2_COMMON,
     CONF_SLAT_WIDTH: 80.0,
     CONF_SLAT_SPACING: 50.0,
     CONF_TILT_RANGE: TiltRange.SINGLE,
@@ -96,8 +103,8 @@ class TestIntegrationStep:
         assert result2["data"]["entry_type"] == ENTRY_TYPE_INTEGRATION
 
 
-class TestZoneBasicStep:
-    async def test_shows_zone_basic_form_when_integration_exists(
+class TestZoneStep:
+    async def test_shows_zone_form_when_integration_exists(
         self, hass: HomeAssistant, integration_entry: MockConfigEntry
     ) -> None:
         from homeassistant.data_entry_flow import FlowResultType
@@ -106,12 +113,57 @@ class TestZoneBasicStep:
             DOMAIN, context={"source": "user"}
         )
         assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "zone_basic"
+        assert result["step_id"] == "zone"
 
-    async def test_vertical_cover_creates_entry_directly(
+    async def test_zone_step1_routes_to_zone_configure(
         self, hass: HomeAssistant, integration_entry: MockConfigEntry
     ) -> None:
-        """Vertical blinds need no extra step - entry created after zone_basic."""
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "zone_configure"
+
+    async def test_horizontal_cover_shows_configure_step(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        step1 = {**ZONE_STEP1_VERTICAL, CONF_COVER_TYPE: CoverType.HORIZONTAL}
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=step1
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "zone_configure"
+
+    async def test_tilt_cover_shows_configure_step(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        step1 = {**ZONE_STEP1_VERTICAL, CONF_COVER_TYPE: CoverType.TILT}
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=step1
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "zone_configure"
+
+
+class TestZoneConfigureStep:
+    async def test_creates_vertical_zone_entry(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
         from homeassistant.data_entry_flow import FlowResultType
 
         with patch(
@@ -122,46 +174,17 @@ class TestZoneBasicStep:
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": "user"}
             )
-            result2 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=ZONE_BASIC_INPUT
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP1_VERTICAL
             )
-        assert result2["type"] == FlowResultType.CREATE_ENTRY
-        assert result2["data"]["entry_type"] == ENTRY_TYPE_ZONE
-        assert result2["data"][CONF_AZIMUTH] == 180
-        assert result2["data"]["name"] == "South Terrace"
+            result3 = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP2_COMMON
+            )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"]["entry_type"] == ENTRY_TYPE_ZONE
+        assert result3["data"][CONF_AZIMUTH] == 180
+        assert result3["data"]["name"] == "South Terrace"
 
-    async def test_horizontal_cover_routes_to_zone_horizontal(
-        self, hass: HomeAssistant, integration_entry: MockConfigEntry
-    ) -> None:
-        from homeassistant.data_entry_flow import FlowResultType
-
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        basic_input = {**ZONE_BASIC_INPUT, CONF_COVER_TYPE: CoverType.HORIZONTAL}
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input=basic_input
-        )
-        assert result2["type"] == FlowResultType.FORM
-        assert result2["step_id"] == "zone_horizontal"
-
-    async def test_tilt_cover_routes_to_zone_tilt(
-        self, hass: HomeAssistant, integration_entry: MockConfigEntry
-    ) -> None:
-        from homeassistant.data_entry_flow import FlowResultType
-
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        basic_input = {**ZONE_BASIC_INPUT, CONF_COVER_TYPE: CoverType.TILT}
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input=basic_input
-        )
-        assert result2["type"] == FlowResultType.FORM
-        assert result2["step_id"] == "zone_tilt"
-
-
-class TestZoneHorizontalStep:
     async def test_creates_horizontal_zone_entry(
         self, hass: HomeAssistant, integration_entry: MockConfigEntry
     ) -> None:
@@ -175,21 +198,18 @@ class TestZoneHorizontalStep:
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": "user"}
             )
-            basic_input = {**ZONE_BASIC_INPUT, CONF_COVER_TYPE: CoverType.HORIZONTAL}
-            result2 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=basic_input
+            step1 = {**ZONE_STEP1_VERTICAL, CONF_COVER_TYPE: CoverType.HORIZONTAL}
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=step1
             )
-            assert result2["step_id"] == "zone_horizontal"
             result3 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=HORIZONTAL_INPUT
+                result["flow_id"], user_input=ZONE_STEP2_HORIZONTAL
             )
         assert result3["type"] == FlowResultType.CREATE_ENTRY
         assert result3["data"]["entry_type"] == ENTRY_TYPE_ZONE
         assert result3["data"][CONF_AWN_LENGTH] == 3.0
         assert result3["data"][CONF_COVER_TYPE] == CoverType.HORIZONTAL
 
-
-class TestZoneTiltStep:
     async def test_creates_tilt_zone_entry(
         self, hass: HomeAssistant, integration_entry: MockConfigEntry
     ) -> None:
@@ -203,13 +223,12 @@ class TestZoneTiltStep:
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": "user"}
             )
-            basic_input = {**ZONE_BASIC_INPUT, CONF_COVER_TYPE: CoverType.TILT}
-            result2 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=basic_input
+            step1 = {**ZONE_STEP1_VERTICAL, CONF_COVER_TYPE: CoverType.TILT}
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=step1
             )
-            assert result2["step_id"] == "zone_tilt"
             result3 = await hass.config_entries.flow.async_configure(
-                result["flow_id"], user_input=TILT_INPUT
+                result["flow_id"], user_input=ZONE_STEP2_TILT
             )
         assert result3["type"] == FlowResultType.CREATE_ENTRY
         assert result3["data"]["entry_type"] == ENTRY_TYPE_ZONE
@@ -224,13 +243,12 @@ class TestZoneTiltStep:
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"}
         )
-        basic_input = {**ZONE_BASIC_INPUT, CONF_COVER_TYPE: CoverType.TILT}
-        result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], user_input=basic_input
+        step1 = {**ZONE_STEP1_VERTICAL, CONF_COVER_TYPE: CoverType.TILT}
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=step1
         )
-        assert result2["step_id"] == "zone_tilt"
-
         bad_tilt = {
+            **ZONE_STEP2_COMMON,
             CONF_SLAT_WIDTH: 50.0,
             CONF_SLAT_SPACING: 60.0,  # spacing > width -- should fail
             CONF_TILT_RANGE: TiltRange.SINGLE,
