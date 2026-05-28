@@ -354,72 +354,71 @@ class IntegrationOptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         data = {**self._entry.data, **self._entry.options}
-        schema = vol.Schema(
+        schema = self.add_suggested_values_to_schema(
+            vol.Schema(
+                {
+                    vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="weather")
+                    ),
+                    vol.Optional(CONF_WIND_THRESHOLD): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=50,
+                            step=0.5,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="m/s",
+                        )
+                    ),
+                    vol.Optional(CONF_MIN_TEMP): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=-20,
+                            max=30,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="°C",
+                        )
+                    ),
+                    vol.Optional(CONF_INACTIVE_POSITION): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            step=1,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="%",
+                        )
+                    ),
+                    vol.Optional(CONF_OVERRIDE_DURATION): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=15,
+                            max=480,
+                            step=15,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="min",
+                        )
+                    ),
+                    vol.Optional(CONF_HYSTERESIS): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=20,
+                            step=0.5,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="%",
+                        )
+                    ),
+                }
+            ),
             {
-                vol.Optional(
-                    CONF_WEATHER_ENTITY, default=data.get(CONF_WEATHER_ENTITY)
-                ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="weather")
+                CONF_WEATHER_ENTITY: data.get(CONF_WEATHER_ENTITY),
+                CONF_WIND_THRESHOLD: data.get(CONF_WIND_THRESHOLD),
+                CONF_MIN_TEMP: data.get(CONF_MIN_TEMP),
+                CONF_INACTIVE_POSITION: data.get(
+                    CONF_INACTIVE_POSITION, DEFAULT_INACTIVE_POSITION
                 ),
-                vol.Optional(
-                    CONF_WIND_THRESHOLD, default=data.get(CONF_WIND_THRESHOLD)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=50,
-                        step=0.5,
-                        mode=NumberSelectorMode.BOX,
-                        unit_of_measurement="m/s",
-                    )
+                CONF_OVERRIDE_DURATION: data.get(
+                    CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION
                 ),
-                vol.Optional(
-                    CONF_MIN_TEMP, default=data.get(CONF_MIN_TEMP)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=-20,
-                        max=30,
-                        step=1,
-                        mode=NumberSelectorMode.BOX,
-                        unit_of_measurement="°C",
-                    )
-                ),
-                vol.Optional(
-                    CONF_INACTIVE_POSITION,
-                    default=data.get(CONF_INACTIVE_POSITION, DEFAULT_INACTIVE_POSITION),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=100,
-                        step=1,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="%",
-                    )
-                ),
-                vol.Optional(
-                    CONF_OVERRIDE_DURATION,
-                    default=data.get(CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=15,
-                        max=480,
-                        step=15,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="min",
-                    )
-                ),
-                vol.Optional(
-                    CONF_HYSTERESIS,
-                    default=data.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=0,
-                        max=20,
-                        step=0.5,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="%",
-                    )
-                ),
-            }
+                CONF_HYSTERESIS: data.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
+            },
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
