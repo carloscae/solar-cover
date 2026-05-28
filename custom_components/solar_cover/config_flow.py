@@ -1,4 +1,5 @@
-"""Config flow for Solar Cover - integration step then zone step."""
+"""Config flow for Solar Cover - integration step then multi-step zone flow."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -46,9 +47,14 @@ def _auto_elevation_threshold(hass_config: Any) -> float:
 
 
 class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Two-step config flow: integration (global) then zone."""
+    """Multi-step config flow: integration (global) then zone (per cover group)."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        """Initialise flow state."""
+        super().__init__()
+        self._zone_partial: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -60,7 +66,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
             if e.data.get("entry_type") == ENTRY_TYPE_INTEGRATION
         ]
         if existing:
-            return await self.async_step_zone()
+            return await self.async_step_zone_basic()
         return await self.async_step_integration()
 
     async def async_step_integration(
@@ -123,27 +129,20 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         return self.async_show_form(step_id="integration", data_schema=schema)
 
-    async def async_step_zone(
+    async def async_step_zone_basic(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle zone-level settings."""
-        errors: dict[str, str] = {}
+        """Collect name, cover entities, type, geometry basics, and window dims."""
+        self._zone_partial = {}
 
         if user_input is not None:
+            self._zone_partial = dict(user_input)
             cover_type = user_input.get(CONF_COVER_TYPE)
+            if cover_type == CoverType.HORIZONTAL:
+                return await self.async_step_zone_horizontal()
             if cover_type == CoverType.TILT:
-                slat_width = float(user_input.get(CONF_SLAT_WIDTH, 80.0))
-                slat_spacing = float(user_input.get(CONF_SLAT_SPACING, 50.0))
-                if slat_spacing > slat_width:
-                    errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
-
-            if not errors:
-                data = {
-                    "entry_type": ENTRY_TYPE_ZONE,
-                    **user_input,
-                }
-                title = str(user_input.get("name", "Cover Zone"))
-                return self.async_create_entry(title=title, data=data)
+                return await self.async_step_zone_tilt()
+            return await self.async_step_zone_vertical()
 
         auto_threshold = _auto_elevation_threshold(self.hass.config)
         schema = vol.Schema(
@@ -214,9 +213,35 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="m",
                     )
                 ),
-                vol.Optional(
-                    CONF_ATTACH_HEIGHT, default=2.5
-                ): selector.NumberSelector(
+            }
+        )
+        return self.async_show_form(step_id="zone_basic", data_schema=schema)
+
+    async def async_step_zone_vertical(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """No extra geometry for vertical blinds - create the entry immediately."""
+        title = str(self._zone_partial.get("name", "Cover Zone"))
+        return self.async_create_entry(
+            title=title,
+            data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
+        )
+
+    async def async_step_zone_horizontal(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect awning-specific dimensions."""
+        if user_input is not None:
+            self._zone_partial.update(user_input)
+            title = str(self._zone_partial.get("name", "Cover Zone"))
+            return self.async_create_entry(
+                title=title,
+                data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_ATTACH_HEIGHT, default=2.5): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0.5,
                         max=5.0,
@@ -243,6 +268,31 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="deg",
                     )
                 ),
+            }
+        )
+        return self.async_show_form(step_id="zone_horizontal", data_schema=schema)
+
+    async def async_step_zone_tilt(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect venetian blind slat dimensions with spacing validation."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            slat_width = float(user_input.get(CONF_SLAT_WIDTH, 80.0))
+            slat_spacing = float(user_input.get(CONF_SLAT_SPACING, 50.0))
+            if slat_spacing > slat_width:
+                errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
+            else:
+                self._zone_partial.update(user_input)
+                title = str(self._zone_partial.get("name", "Cover Zone"))
+                return self.async_create_entry(
+                    title=title,
+                    data={"entry_type": ENTRY_TYPE_ZONE, **self._zone_partial},
+                )
+
+        schema = vol.Schema(
+            {
                 vol.Optional(CONF_SLAT_WIDTH, default=80): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=20,
@@ -264,12 +314,10 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_TILT_RANGE, default=TiltRange.SINGLE
                 ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[e.value for e in TiltRange]
-                    )
+                    selector.SelectSelectorConfig(options=[e.value for e in TiltRange])
                 ),
             }
         )
         return self.async_show_form(
-            step_id="zone", data_schema=schema, errors=errors
+            step_id="zone_tilt", data_schema=schema, errors=errors
         )

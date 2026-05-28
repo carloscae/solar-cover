@@ -6,36 +6,81 @@
         "description": "These settings apply to all cover zones. All fields are optional.",
         "data": {
           "weather_entity": "Weather entity",
-          "wind_threshold": "Wind speed threshold (m/s)",
-          "min_temp": "Minimum outdoor temperature (degrees C)",
-          "inactive_position": "Inactive position (%)",
-          "override_duration": "Manual override duration (minutes)"
+          "wind_threshold": "Wind speed limit",
+          "min_temp": "Minimum outdoor temperature",
+          "inactive_position": "Parked position",
+          "override_duration": "Manual override duration"
+        },
+        "data_description": {
+          "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
+          "wind_threshold": "Covers retract automatically when wind exceeds this speed (m/s).",
+          "min_temp": "Covers stay retracted below this temperature to let in warmth (°C).",
+          "inactive_position": "Position (0-100%) when the sun is not hitting the window.",
+          "override_duration": "How long a manual position adjustment suppresses automation (minutes)."
         }
       },
-      "zone": {
-        "title": "Cover Zone",
-        "description": "Configure a group of covers that move together.",
+      "zone_basic": {
+        "title": "Cover Zone - Basics",
+        "description": "Name this zone and point it at your window. Hold your phone flat against the glass to read the compass bearing.",
         "data": {
           "name": "Zone name",
           "cover_entities": "Cover entities",
           "cover_type": "Cover type",
-          "azimuth": "Compass bearing (degrees)",
-          "fov_left": "Field of view - left (degrees)",
-          "fov_right": "Field of view - right (degrees)",
-          "elevation_threshold": "Elevation threshold (degrees)",
-          "window_height": "Window height (m)",
-          "glare_depth": "Glare protection depth (m)",
-          "attach_height": "Attachment height above floor (m)",
-          "awn_length": "Awning span length (m)",
-          "awn_angle": "Awning angle from horizontal (degrees)",
-          "slat_width": "Slat width (mm)",
-          "slat_spacing": "Slat spacing (mm)",
+          "azimuth": "Window compass bearing",
+          "fov_left": "Sun window - left edge",
+          "fov_right": "Sun window - right edge",
+          "elevation_threshold": "Activate above sun angle",
+          "window_height": "Window height",
+          "glare_depth": "Shade depth from window"
+        },
+        "data_description": {
+          "name": "A short name for this zone (e.g. Living room south).",
+          "cover_entities": "The cover devices that move together in this zone.",
+          "cover_type": "The physical type of cover determines which geometry is used.",
+          "azimuth": "Compass direction your window faces (0=North, 90=East, 180=South, 270=West).",
+          "fov_left": "Degrees left of center where the sun first hits this window.",
+          "fov_right": "Degrees right of center where the sun last hits this window.",
+          "elevation_threshold": "Covers only deploy when the sun is above this angle (°). Auto-calculated from your latitude.",
+          "window_height": "Floor-to-ceiling height of the glazed area in metres.",
+          "glare_depth": "How far into the room you want to keep shaded (metres)."
+        }
+      },
+      "zone_vertical": {
+        "title": "Cover Zone - Vertical Blind",
+        "description": "No additional geometry needed for vertical blinds.",
+        "data": {}
+      },
+      "zone_horizontal": {
+        "title": "Cover Zone - Awning",
+        "description": "Dimensions of the retractable awning.",
+        "data": {
+          "attach_height": "Awning attachment height",
+          "awn_length": "Awning reach when fully extended",
+          "awn_angle": "Awning slope angle"
+        },
+        "data_description": {
+          "attach_height": "Height of the awning rail above the floor (metres).",
+          "awn_length": "Maximum horizontal projection of the awning when fully extended (metres).",
+          "awn_angle": "Downward angle of the awning from horizontal (degrees). Typical: 10-20°."
+        }
+      },
+      "zone_tilt": {
+        "title": "Cover Zone - Venetian Blind",
+        "description": "Slat dimensions for the tilt calculation.",
+        "data": {
+          "slat_width": "Slat width",
+          "slat_spacing": "Gap between slats",
           "tilt_range": "Tilt range"
+        },
+        "data_description": {
+          "slat_width": "Width of each slat in millimetres.",
+          "slat_spacing": "Centre-to-centre gap between slats in millimetres. Must be <= slat width.",
+          "tilt_range": "Single: slats tilt 0-90°. Bidirectional: slats tilt -90° to +90°."
         }
       }
     },
     "error": {
-      "spacing_exceeds_width": "Slat spacing must be less than or equal to slat width.",
+      "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
       "unknown": "Unexpected error. Check the logs."
     }
   }
