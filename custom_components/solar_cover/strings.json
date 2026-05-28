@@ -6,76 +6,77 @@
         "description": "These settings apply to all cover zones. All fields are optional.",
         "data": {
           "weather_entity": "Weather entity",
-          "wind_threshold": "Wind speed limit",
+          "wind_threshold": "Retract covers in strong wind",
           "min_temp": "Minimum outdoor temperature",
-          "inactive_position": "Parked position",
-          "override_duration": "Manual override duration"
+          "inactive_position": "Rest position when sun is not active",
+          "override_duration": "How long manual adjustments last"
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
-          "wind_threshold": "Covers retract automatically when wind exceeds this speed (m/s).",
-          "min_temp": "Covers stay retracted below this temperature to let in warmth (°C).",
-          "inactive_position": "Position (0-100%) when the sun is not hitting the window.",
-          "override_duration": "How long a manual position adjustment suppresses automation (minutes)."
+          "wind_threshold": "Covers will retract automatically when wind speed exceeds this value (m/s). Leave empty to ignore wind.",
+          "min_temp": "Covers stay open below this temperature so the room can warm up (°C).",
+          "inactive_position": "How far open or closed the covers sit when the sun is not hitting the window (0 = fully open, 100 = fully closed).",
+          "override_duration": "After you move a cover manually, automation stays paused for this many minutes."
         }
       },
       "zone_basic": {
-        "title": "Cover Zone - Basics",
+        "title": "Add a Cover Zone",
         "description": "Name this zone and point it at your window. Hold your phone flat against the glass to read the compass bearing.",
         "data": {
           "name": "Zone name",
-          "cover_entities": "Cover entities",
+          "cover_entities": "Cover devices",
           "cover_type": "Cover type",
           "azimuth": "Window compass bearing",
-          "fov_left": "Sun window - left edge",
-          "fov_right": "Sun window - right edge",
-          "elevation_threshold": "Activate above sun angle",
+          "fov_left": "How far left the sun shines in",
+          "fov_right": "How far right the sun shines in",
+          "elevation_threshold": "Minimum sun height to activate",
           "window_height": "Window height",
-          "glare_depth": "Shade depth from window"
+          "glare_depth": "How far into the room to shade"
         },
         "data_description": {
-          "name": "A short name for this zone (e.g. Living room south).",
+          "name": "A short label for this zone, for example: Living room south.",
           "cover_entities": "The cover devices that move together in this zone.",
-          "cover_type": "The physical type of cover determines which geometry is used.",
-          "azimuth": "Compass direction your window faces (0=North, 90=East, 180=South, 270=West).",
-          "fov_left": "Degrees left of center where the sun first hits this window.",
-          "fov_right": "Degrees right of center where the sun last hits this window.",
-          "elevation_threshold": "Covers only deploy when the sun is above this angle (°). Auto-calculated from your latitude.",
-          "window_height": "Floor-to-ceiling height of the glazed area in metres.",
-          "glare_depth": "How far into the room you want to keep shaded (metres)."
+          "cover_type": "The physical type of cover. This determines how positions are calculated.",
+          "azimuth": "The compass direction your window faces (0 = North, 90 = East, 180 = South, 270 = West).",
+          "fov_left": "How many degrees to the left of the window center the sun can still shine in. Start with 90 and reduce it if a wall or obstacle blocks part of the view.",
+          "fov_right": "How many degrees to the right of the window center the sun can still shine in. Start with 90 and reduce it if a wall or obstacle blocks part of the view.",
+          "elevation_threshold": "The covers only deploy when the sun is at least this many degrees above the horizon. Pre-filled based on your location - you can raise it to ignore a low winter sun.",
+          "window_height": "The height of the glass area from floor to top, in metres.",
+          "glare_depth": "How far back from the window you want to keep free of direct sunlight, in metres."
         }
       },
       "zone_vertical": {
-        "title": "Cover Zone - Vertical Blind",
+        "title": "Vertical Blind - Done",
         "description": "No additional geometry needed for vertical blinds.",
-        "data": {}
+        "data": {},
+        "data_description": {}
       },
       "zone_horizontal": {
-        "title": "Cover Zone - Awning",
-        "description": "Dimensions of the retractable awning.",
+        "title": "Awning Settings",
+        "description": "Enter the physical dimensions of your retractable awning.",
         "data": {
-          "attach_height": "Awning attachment height",
-          "awn_length": "Awning reach when fully extended",
+          "attach_height": "Height of awning rail above floor",
+          "awn_length": "Maximum reach when fully extended",
           "awn_angle": "Awning slope angle"
         },
         "data_description": {
-          "attach_height": "Height of the awning rail above the floor (metres).",
-          "awn_length": "Maximum horizontal projection of the awning when fully extended (metres).",
-          "awn_angle": "Downward angle of the awning from horizontal (degrees). Typical: 10-20°."
+          "attach_height": "How high above the floor the awning rail is mounted, in metres.",
+          "awn_length": "How far out the awning extends when fully open, measured horizontally in metres.",
+          "awn_angle": "The downward tilt angle of the awning fabric from horizontal, in degrees. Most awnings are set between 10° and 20°."
         }
       },
       "zone_tilt": {
-        "title": "Cover Zone - Venetian Blind",
-        "description": "Slat dimensions for the tilt calculation.",
+        "title": "Venetian Blind Settings",
+        "description": "Enter the slat dimensions so the tilt angle can be calculated correctly.",
         "data": {
           "slat_width": "Slat width",
           "slat_spacing": "Gap between slats",
           "tilt_range": "Tilt range"
         },
         "data_description": {
-          "slat_width": "Width of each slat in millimetres.",
-          "slat_spacing": "Centre-to-centre gap between slats in millimetres. Must be <= slat width.",
-          "tilt_range": "Single: slats tilt 0-90°. Bidirectional: slats tilt -90° to +90°."
+          "slat_width": "The width of each individual slat, in millimetres.",
+          "slat_spacing": "The distance from the center of one slat to the center of the next, in millimetres. This must not be larger than the slat width.",
+          "tilt_range": "Single direction: slats tilt from fully open (0°) to fully closed (90°). Bidirectional: slats can also tilt the other way, from 0° to -90°."
         }
       }
     },
