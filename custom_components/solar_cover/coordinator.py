@@ -149,16 +149,17 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         wind_speed: float | None = None
         outdoor_temp: float | None = None
 
-        if weather_state and weather_state.state not in ("unavailable", "unknown"):
-            raining = weather_state.state in (
-                "rainy",
-                "pouring",
-                "snowy",
-                "lightning-rainy",
-            )
+        if weather_state:
             attrs = weather_state.attributes
             wind_speed = attrs.get("wind_speed")
             outdoor_temp = attrs.get("temperature")
+            if weather_state.state not in ("unavailable", "unknown"):
+                raining = weather_state.state in (
+                    "rainy",
+                    "pouring",
+                    "snowy",
+                    "lightning-rainy",
+                )
 
         win_az = self._zone[CONF_AZIMUTH]
         gamma = compute_gamma(win_az, sol_az)
