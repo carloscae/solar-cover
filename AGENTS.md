@@ -57,7 +57,7 @@ To execute tasks in parallel without merge collisions or overlapping efforts, fo
 ### Module Responsibilities
 *   `solar.py` — sun position and daily curve via astral. Pure functions where possible.
 *   `geometry.py` — cover position formulas (vertical, horizontal, tilt). Pure functions, no HA imports.
-*   `intent.py` — sequential gate model (elevation → FOV → weather → manual override). Returns intent enum + computed position.
+*   `intent.py` — sequential gate model (elevation → FOV → weather → overcast/radiation → manual override). Returns intent enum + computed position.
 *   `coordinator.py` — orchestrates solar engine, intent model, entity state updates.
 *   `config_flow.py` — two-step flow: integration setup, then zone setup.
 *   `cover.py` — HA cover entity. Reads coordinator state, exposes observability attributes.
@@ -76,4 +76,22 @@ To execute tasks in parallel without merge collisions or overlapping efforts, fo
 
 ### Observability (non-negotiable)
 Every cover entity must expose `intent` as a string attribute. Valid values:
-`shading`, `inactive_sun_low`, `inactive_outside_fov`, `inactive_weather`, `manual_override`
+`shading`, `inactive_sun_low`, `inactive_outside_fov`, `inactive_weather`, `inactive_overcast`, `manual_override`
+
+### Config Entry Titles (enforced at startup)
+*   Integration entry title: `"Global Settings"`
+*   Zone entry title: `"Zone: <name>"` (applied via `async_update_entry` in `async_setup_entry`)
+*   Changing global settings triggers cascade reload of all zone entries via `_async_update_integration_listener`.
+
+### Sensor Subscription Pattern
+The coordinator subscribes to weather + cloud + radiation entities via a single `async_track_state_change_event` call stored in `_unsub_sensors`. Any of the three changing triggers a refresh.
+
+### Cloud/Radiation Gate (Gate 4 in intent model)
+*   Radiation takes precedence when both are configured: if `radiation < radiation_threshold` returns `INACTIVE_OVERCAST`.
+*   If only cloud is configured: if `cloud_coverage > cloud_threshold` returns `INACTIVE_OVERCAST`.
+*   Sensor reads use `_read_sensor()` helper — handles None entity_id, unavailable/unknown state, and non-numeric values gracefully.
+
+### External Submissions
+*   HACS default store: PR #8092 in `hacs/default` (master branch), all checks passing as of 2026-05-30.
+*   HA brands: not needed since HA 2026.3.0 -- brand icons are served from `custom_components/solar_cover/brand/icon.png` directly.
+*   HACS store listing icon: `icon.png` at repo root (256x256).
