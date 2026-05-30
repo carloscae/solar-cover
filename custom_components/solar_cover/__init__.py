@@ -22,6 +22,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_type = entry.data.get("entry_type", ENTRY_TYPE_ZONE)
 
     if entry_type == ENTRY_TYPE_INTEGRATION:
+        if entry.title != "Global Settings":
+            hass.config_entries.async_update_entry(entry, title="Global Settings")
         integration_data = {**entry.data, **entry.options}
         hass.data[DOMAIN]["integration"] = integration_data
         entry.async_on_unload(
@@ -32,6 +34,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Zone entry
     integration_data = hass.data[DOMAIN].get("integration", {})
     zone_data = {**entry.data, **entry.options}
+    zone_name = zone_data.get("name", "Cover Zone")
+    expected_title = f"Zone: {zone_name}"
+    if entry.title != expected_title:
+        hass.config_entries.async_update_entry(entry, title=expected_title)
     solar = SolarEngine(
         lat=hass.config.latitude,
         lon=hass.config.longitude,
