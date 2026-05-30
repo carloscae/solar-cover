@@ -24,7 +24,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry_type == ENTRY_TYPE_INTEGRATION:
         integration_data = {**entry.data, **entry.options}
         hass.data[DOMAIN]["integration"] = integration_data
-        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        entry.async_on_unload(
+            entry.add_update_listener(_async_update_integration_listener)
+        )
         return True
 
     # Zone entry
@@ -68,3 +70,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the config entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _async_update_integration_listener(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Reload integration entry and all zone entries when global options change.
+
+    Zone coordinators hold a snapshot of integration_data at construction time.
+    Without this cascade, changing the weather entity (or cloud/radiation sensors)
+    in global settings would be silently ignored by running zone coordinators.
+    """
+    await hass.config_entries.async_reload(entry.entry_id)
+    for zone_entry in hass.config_entries.async_entries(DOMAIN):
+        if zone_entry.data.get("entry_type", ENTRY_TYPE_ZONE) == ENTRY_TYPE_ZONE:
+            await hass.config_entries.async_reload(zone_entry.entry_id)

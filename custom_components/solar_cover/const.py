@@ -13,6 +13,10 @@ CONF_WIND_THRESHOLD = "wind_threshold"
 CONF_MIN_TEMP = "min_temp"
 CONF_INACTIVE_POSITION = "inactive_position"
 CONF_OVERRIDE_DURATION = "override_duration"
+CONF_CLOUD_ENTITY = "cloud_entity"
+CONF_CLOUD_THRESHOLD = "cloud_threshold"
+CONF_RADIATION_ENTITY = "radiation_entity"
+CONF_RADIATION_THRESHOLD = "radiation_threshold"
 
 # Zone config keys
 CONF_COVER_ENTITIES = "cover_entities"
@@ -60,6 +64,7 @@ class Intent(StrEnum):
     INACTIVE_SUN_LOW = "inactive_sun_low"
     INACTIVE_OUTSIDE_FOV = "inactive_outside_fov"
     INACTIVE_WEATHER = "inactive_weather"
+    INACTIVE_OVERCAST = "inactive_overcast"
     MANUAL_OVERRIDE = "manual_override"
 
 

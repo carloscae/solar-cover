@@ -21,6 +21,8 @@ from .const import (
     CONF_AWN_ANGLE,
     CONF_AWN_LENGTH,
     CONF_AZIMUTH,
+    CONF_CLOUD_ENTITY,
+    CONF_CLOUD_THRESHOLD,
     CONF_COVER_ENTITIES,
     CONF_COVER_TYPE,
     CONF_ELEVATION_THRESHOLD,
@@ -33,6 +35,8 @@ from .const import (
     CONF_MIN_POSITION,
     CONF_MIN_TEMP,
     CONF_OVERRIDE_DURATION,
+    CONF_RADIATION_ENTITY,
+    CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
     CONF_TILT_RANGE,
@@ -143,6 +147,30 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         step=15,
                         mode=NumberSelectorMode.SLIDER,
                         unit_of_measurement="min",
+                    )
+                ),
+                vol.Optional(CONF_CLOUD_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_CLOUD_THRESHOLD): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=5,
+                        mode=NumberSelectorMode.SLIDER,
+                        unit_of_measurement="%",
+                    )
+                ),
+                vol.Optional(CONF_RADIATION_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_RADIATION_THRESHOLD): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=1200,
+                        step=10,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="W/m²",
                     )
                 ),
             }
@@ -421,6 +449,30 @@ class IntegrationOptionsFlow(OptionsFlow):
                             unit_of_measurement="%",
                         )
                     ),
+                    vol.Optional(CONF_CLOUD_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(CONF_CLOUD_THRESHOLD): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=100,
+                            step=5,
+                            mode=NumberSelectorMode.SLIDER,
+                            unit_of_measurement="%",
+                        )
+                    ),
+                    vol.Optional(CONF_RADIATION_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(CONF_RADIATION_THRESHOLD): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=1200,
+                            step=10,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="W/m²",
+                        )
+                    ),
                 }
             ),
             {
@@ -434,6 +486,10 @@ class IntegrationOptionsFlow(OptionsFlow):
                     CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION
                 ),
                 CONF_HYSTERESIS: data.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
+                CONF_CLOUD_ENTITY: data.get(CONF_CLOUD_ENTITY),
+                CONF_CLOUD_THRESHOLD: data.get(CONF_CLOUD_THRESHOLD),
+                CONF_RADIATION_ENTITY: data.get(CONF_RADIATION_ENTITY),
+                CONF_RADIATION_THRESHOLD: data.get(CONF_RADIATION_THRESHOLD),
             },
         )
         return self.async_show_form(step_id="init", data_schema=schema)

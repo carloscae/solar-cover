@@ -21,6 +21,8 @@ from .const import (
     CONF_AWN_ANGLE,
     CONF_AWN_LENGTH,
     CONF_AZIMUTH,
+    CONF_CLOUD_ENTITY,
+    CONF_CLOUD_THRESHOLD,
     CONF_COVER_ENTITIES,
     CONF_COVER_TYPE,
     CONF_ELEVATION_THRESHOLD,
@@ -33,6 +35,8 @@ from .const import (
     CONF_MAX_POSITION,
     CONF_MIN_POSITION,
     CONF_MIN_TEMP,
+    CONF_RADIATION_ENTITY,
+    CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
     CONF_TILT_RANGE,
@@ -107,17 +111,25 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._last_intent: Intent | None = None
         self._enabled: bool = True
         self._manual_override_until: datetime | None = None
-        self._unsub_weather: Any = None
+        self._unsub_sensors: Any = None
         self._store: Store = Store(hass, 1, f"solar_cover.{entry_id}")
 
-        weather_entity = integration_data.get(CONF_WEATHER_ENTITY)
-        if weather_entity:
-            self._unsub_weather = async_track_state_change_event(
-                hass, [weather_entity], self._on_weather_change
+        watch = [
+            e
+            for e in (
+                integration_data.get(CONF_WEATHER_ENTITY),
+                integration_data.get(CONF_CLOUD_ENTITY),
+                integration_data.get(CONF_RADIATION_ENTITY),
+            )
+            if e
+        ]
+        if watch:
+            self._unsub_sensors = async_track_state_change_event(
+                hass, watch, self._on_sensor_change
             )
 
     @callback
-    def _on_weather_change(self, event: Any) -> None:
+    def _on_sensor_change(self, event: Any) -> None:
         self.hass.async_create_task(self.async_request_refresh())
 
     @property
@@ -161,6 +173,13 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     "lightning-rainy",
                 )
 
+        cloud_coverage: float | None = self._read_sensor(
+            self._integration.get(CONF_CLOUD_ENTITY)
+        )
+        radiation: float | None = self._read_sensor(
+            self._integration.get(CONF_RADIATION_ENTITY)
+        )
+
         win_az = self._zone[CONF_AZIMUTH]
         gamma = compute_gamma(win_az, sol_az)
 
@@ -176,6 +195,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             wind_threshold=self._integration.get(CONF_WIND_THRESHOLD),
             outdoor_temp=outdoor_temp,
             min_temp=self._integration.get(CONF_MIN_TEMP),
+            cloud_coverage=cloud_coverage,
+            cloud_threshold=self._integration.get(CONF_CLOUD_THRESHOLD),
+            radiation=radiation,
+            radiation_threshold=self._integration.get(CONF_RADIATION_THRESHOLD),
             manual_override_until=self._manual_override_until,
             now=now,
             cover_type=CoverType(self._zone[CONF_COVER_TYPE]),
@@ -263,6 +286,18 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             fov_entry=entry.isoformat() if entry else None,
             fov_exit=exit_.isoformat() if exit_ else None,
         )
+
+    def _read_sensor(self, entity_id: str | None) -> float | None:
+        """Read a numeric sensor state; return None if unavailable or not configured."""
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown"):
+            return None
+        try:
+            return float(state.state)
+        except ValueError:
+            return None
 
     async def _command_covers(self, position: float) -> None:
         entities = self._zone.get(CONF_COVER_ENTITIES, [])

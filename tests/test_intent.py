@@ -95,6 +95,89 @@ class TestWeatherGate:
         assert intent != Intent.INACTIVE_WEATHER
 
 
+class TestOvercastGate:
+    def test_radiation_below_threshold_returns_inactive_overcast(
+        self, base_input: IntentInput
+    ) -> None:
+        inp = IntentInput(
+            **{**base_input.__dict__, "radiation": 80.0, "radiation_threshold": 120.0}
+        )
+        intent, position = evaluate_intent(inp)
+        assert intent == Intent.INACTIVE_OVERCAST
+        assert position is None
+
+    def test_radiation_above_threshold_continues(
+        self, base_input: IntentInput
+    ) -> None:
+        inp = IntentInput(
+            **{**base_input.__dict__, "radiation": 500.0, "radiation_threshold": 120.0}
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent != Intent.INACTIVE_OVERCAST
+
+    def test_cloud_above_threshold_returns_inactive_overcast(
+        self, base_input: IntentInput
+    ) -> None:
+        inp = IntentInput(
+            **{**base_input.__dict__, "cloud_coverage": 90.0, "cloud_threshold": 80.0}
+        )
+        intent, position = evaluate_intent(inp)
+        assert intent == Intent.INACTIVE_OVERCAST
+        assert position is None
+
+    def test_cloud_below_threshold_continues(self, base_input: IntentInput) -> None:
+        inp = IntentInput(
+            **{**base_input.__dict__, "cloud_coverage": 50.0, "cloud_threshold": 80.0}
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent != Intent.INACTIVE_OVERCAST
+
+    def test_radiation_takes_precedence_over_cloud(
+        self, base_input: IntentInput
+    ) -> None:
+        # Radiation is fine but cloud is over threshold -- cloud gate should still block
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "radiation": 500.0,
+                "radiation_threshold": 120.0,
+                "cloud_coverage": 95.0,
+                "cloud_threshold": 80.0,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        # radiation passes, cloud blocks
+        assert intent == Intent.INACTIVE_OVERCAST
+
+    def test_radiation_blocks_regardless_of_cloud(
+        self, base_input: IntentInput
+    ) -> None:
+        # Radiation below threshold -- should block even if cloud is fine
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "radiation": 50.0,
+                "radiation_threshold": 120.0,
+                "cloud_coverage": 10.0,
+                "cloud_threshold": 80.0,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent == Intent.INACTIVE_OVERCAST
+
+    def test_no_sensor_configured_skips_gate(self, base_input: IntentInput) -> None:
+        intent, _ = evaluate_intent(base_input)
+        assert intent != Intent.INACTIVE_OVERCAST
+
+    def test_sensor_without_threshold_skips_gate(
+        self, base_input: IntentInput
+    ) -> None:
+        # Entity configured but threshold not set -- gate is skipped
+        inp = IntentInput(**{**base_input.__dict__, "radiation": 50.0})
+        intent, _ = evaluate_intent(inp)
+        assert intent != Intent.INACTIVE_OVERCAST
+
+
 class TestManualOverrideGate:
     def test_active_override_returns_manual_override(
         self, base_input: IntentInput

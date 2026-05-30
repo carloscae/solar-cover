@@ -9,14 +9,22 @@
           "wind_threshold": "Retract covers in strong wind",
           "min_temp": "Minimum outdoor temperature",
           "inactive_position": "Rest position when sun is not active",
-          "override_duration": "How long manual adjustments last"
+          "override_duration": "How long manual adjustments last",
+          "cloud_entity": "Cloud coverage sensor (optional)",
+          "cloud_threshold": "Cloud coverage threshold",
+          "radiation_entity": "Solar radiation sensor (optional)",
+          "radiation_threshold": "Solar radiation threshold"
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
           "wind_threshold": "Covers will retract automatically when wind speed exceeds this value (m/s). Leave empty to ignore wind.",
           "min_temp": "Covers stay open below this temperature so the room can warm up (°C).",
           "inactive_position": "How far open or closed the covers sit when the sun is not hitting the window (0 = fully open, 100 = fully closed).",
-          "override_duration": "After you move a cover manually, automation stays paused for this many minutes."
+          "override_duration": "After you move a cover manually, automation stays paused for this many minutes.",
+          "cloud_entity": "A sensor reporting cloud coverage as a percentage (0-100). Leave empty to skip. Example: sensor.openweathermap_cloud_coverage.",
+          "cloud_threshold": "Covers stay retracted when cloud coverage is above this percentage. Useful when no radiation sensor is available.",
+          "radiation_entity": "A sensor reporting solar irradiance in W/m². Leave empty to skip. Takes precedence over cloud coverage when both are configured. Example: sensor.zamg_global_radiation.",
+          "radiation_threshold": "Covers stay retracted when solar radiation is below this value (W/m²). A clear summer midday is typically 800-1000 W/m². Start with 120."
         }
       },
       "zone": {
@@ -87,6 +95,10 @@
           "inactive_position": "Rest position when sun is not active",
           "override_duration": "How long manual adjustments last",
           "hysteresis": "Minimum position change to move covers",
+          "cloud_entity": "Cloud coverage sensor (optional)",
+          "cloud_threshold": "Cloud coverage threshold",
+          "radiation_entity": "Solar radiation sensor (optional)",
+          "radiation_threshold": "Solar radiation threshold",
           "cover_entities": "Cover devices",
           "cover_type": "Cover type",
           "azimuth": "Window compass bearing",
@@ -105,6 +117,10 @@
           "inactive_position": "Position (0-100%) when the sun is not hitting the window.",
           "override_duration": "After you move a cover manually, automation stays paused for this many minutes.",
           "hysteresis": "Only move covers when the new position differs by at least this percentage. Prevents motor chatter. Default: 3%.",
+          "cloud_entity": "A sensor reporting cloud coverage as a percentage (0-100). Leave empty to skip.",
+          "cloud_threshold": "Covers stay retracted when cloud coverage is above this percentage.",
+          "radiation_entity": "A sensor reporting solar irradiance in W/m². Leave empty to skip. Takes precedence over cloud coverage when both are configured.",
+          "radiation_threshold": "Covers stay retracted when solar radiation is below this value (W/m²). Start with 120.",
           "cover_entities": "The cover devices that move together in this zone.",
           "cover_type": "The physical type of cover determines which geometry is used.",
           "azimuth": "Compass direction your window faces (0=North, 90=East, 180=South, 270=West).",
@@ -179,6 +195,7 @@
           "inactive_sun_low": "Sun too low",
           "inactive_outside_fov": "Sun outside window",
           "inactive_weather": "Retracted - weather",
+          "inactive_overcast": "Retracted - overcast",
           "manual_override": "Manual override"
         }
       },

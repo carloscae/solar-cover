@@ -32,6 +32,11 @@ class IntentInput:
     # Manual override
     manual_override_until: datetime | None
     now: datetime
+    # Overcast / radiation sensors (both optional)
+    cloud_coverage: float | None = None
+    cloud_threshold: float | None = None
+    radiation: float | None = None
+    radiation_threshold: float | None = None
     # Cover type (for geometry dispatch)
     cover_type: CoverType = CoverType.VERTICAL
     # Vertical geometry
@@ -54,8 +59,9 @@ def evaluate_intent(inp: IntentInput) -> tuple[Intent, float | None]:
     1. Elevation -- is sun high enough to shade?
     2. FOV -- is sun in front of this opening?
     3. Weather -- are conditions safe for deployment?
-    4. Manual override -- has user taken manual control?
-    5. Shading -- compute geometry position.
+    4. Overcast -- is solar radiation/cloud coverage too high to bother shading?
+    5. Manual override -- has user taken manual control?
+    6. Shading -- compute geometry position.
     """
     # Gate 1: elevation
     if inp.sol_elev_deg <= inp.elevation_threshold:
@@ -76,11 +82,19 @@ def evaluate_intent(inp: IntentInput) -> tuple[Intent, float | None]:
         if inp.outdoor_temp < inp.min_temp:
             return Intent.INACTIVE_WEATHER, None
 
-    # Gate 4: manual override
+    # Gate 4: overcast / low radiation -- radiation takes precedence when both configured
+    if inp.radiation is not None and inp.radiation_threshold is not None:
+        if inp.radiation < inp.radiation_threshold:
+            return Intent.INACTIVE_OVERCAST, None
+    if inp.cloud_coverage is not None and inp.cloud_threshold is not None:
+        if inp.cloud_coverage > inp.cloud_threshold:
+            return Intent.INACTIVE_OVERCAST, None
+
+    # Gate 5: manual override
     if inp.manual_override_until is not None and inp.now < inp.manual_override_until:
         return Intent.MANUAL_OVERRIDE, None
 
-    # Gate 5: shading -- compute position
+    # Gate 6: shading -- compute position
     position = _compute_position(inp, gamma)
     return Intent.SHADING, position
 
