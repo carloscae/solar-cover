@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.solar_cover.const import Intent
 from custom_components.solar_cover.coordinator import SolarCoverCoordinator
 
 
@@ -82,3 +84,42 @@ class TestStatePersistence:
         coord._store.async_load = AsyncMock(return_value={})
         await coord.async_restore_state()
         assert coord._last_commanded is None
+
+
+class TestManualOverride:
+    @staticmethod
+    def _wire_solar(coord: SolarCoverCoordinator) -> None:
+        # Sun high and dead-centre in the FOV with clear weather, so the only
+        # thing that can produce MANUAL_OVERRIDE is the active override.
+        coord._solar.sun_position = MagicMock(return_value=(180.0, 45.0))
+        coord._solar.hourly_curve = MagicMock(return_value=[])
+        coord._solar.fov_window = MagicMock(return_value=(None, None))
+
+    @pytest.mark.asyncio
+    async def test_active_override_holds_position(self) -> None:
+        coord = _make_coordinator()
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+        coord._last_intent = Intent.SHADING
+        coord._last_commanded = 30.0
+        coord._manual_override_until = datetime.now(tz=UTC) + timedelta(minutes=120)
+
+        data = await coord._async_update_data()
+
+        # Override wins, and the coordinator must NOT drive to the rest position.
+        assert data.intent == Intent.MANUAL_OVERRIDE
+        assert coord.hass.services.async_call.await_count == 0
+        assert data.commanded_position == pytest.approx(30.0)
+
+    @pytest.mark.asyncio
+    async def test_apply_manual_records_last_commanded(self) -> None:
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock()
+        until = datetime.now(tz=UTC) + timedelta(minutes=120)
+
+        await coord.async_apply_manual_position(42.0, until)
+
+        assert coord._last_commanded == pytest.approx(42.0)
+        assert coord._manual_override_until == until
+        coord._store.async_save.assert_awaited_with({"last_commanded": 42.0})

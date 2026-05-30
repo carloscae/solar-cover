@@ -116,21 +116,19 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
             )
         )
 
+    async def _apply_manual(self, position: float) -> None:
+        """Command the covers to a position under a manual override."""
+        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
+        await self.coordinator.async_apply_manual_position(position, until)
+
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Set a manual override and immediately command the physical covers."""
-        position: float = kwargs.get("position", 0)
-        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
-        self.coordinator.set_manual_override(until)
-        await self.coordinator._command_covers(position)
+        await self._apply_manual(float(kwargs.get("position", 0)))
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover fully and set a manual override."""
-        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
-        self.coordinator.set_manual_override(until)
-        await self.coordinator._command_covers(100)
+        await self._apply_manual(100.0)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover fully and set a manual override."""
-        until = datetime.now(tz=UTC) + timedelta(minutes=self._override_duration)
-        self.coordinator.set_manual_override(until)
-        await self.coordinator._command_covers(0)
+        await self._apply_manual(0.0)

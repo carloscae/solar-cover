@@ -271,10 +271,14 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             # horizon, and either intent changed or the position shift exceeds
             # hysteresis. Suppressing commands below the horizon prevents an HA
             # restart at night from re-opening covers the user closed manually.
+            # While a manual override is in effect the user owns the position --
+            # hold whatever they last set and never drive to the inactive rest
+            # position, otherwise the override would be silently undone.
             above_horizon = sol_el > 0
             if (
                 self._enabled
                 and above_horizon
+                and intent != Intent.MANUAL_OVERRIDE
                 and (delta is None or delta >= hysteresis or intent_changed)
             ):
                 await self._command_covers(clamped)
@@ -406,8 +410,21 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             blocking=False,
         )
 
-    def set_manual_override(self, until: datetime) -> None:
+    async def async_apply_manual_position(
+        self, position: float, until: datetime
+    ) -> None:
+        """Command covers to a user-chosen position and start a manual override.
+
+        Records the position as the new committed baseline (and persists it) so
+        the snapshot and hysteresis comparison stay accurate -- commanding the
+        covers directly without this would leave ``_last_commanded`` stale.
+        """
         self._manual_override_until = until
+        self._pending_intent = None
+        self._pending_since = None
+        await self._command_covers(position)
+        self._last_commanded = position
+        await self._store.async_save({"last_commanded": position})
         self.hass.async_create_task(self.async_request_refresh())
 
     def clear_manual_override(self) -> None:

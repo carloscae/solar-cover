@@ -130,9 +130,7 @@ class TestOvercastGate:
         intent, _ = evaluate_intent(inp)
         assert intent != Intent.INACTIVE_OVERCAST
 
-    def test_radiation_takes_precedence_over_cloud(
-        self, base_input: IntentInput
-    ) -> None:
+    def test_cloud_blocks_when_radiation_ok(self, base_input: IntentInput) -> None:
         # Radiation is fine but cloud is over threshold -- cloud gate should still block
         inp = IntentInput(
             **{
@@ -188,6 +186,57 @@ class TestManualOverrideGate:
         inp = IntentInput(**{**base_input.__dict__, "manual_override_until": past})
         intent, _ = evaluate_intent(inp)
         assert intent != Intent.MANUAL_OVERRIDE
+
+    def test_override_beats_low_sun(self, base_input: IntentInput) -> None:
+        # Sun below threshold but an override is active -- override holds.
+        future = datetime(2026, 6, 21, 14, 0, tzinfo=UTC)
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "sol_elev_deg": 5.0,
+                "manual_override_until": future,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent == Intent.MANUAL_OVERRIDE
+
+    def test_override_beats_outside_fov(self, base_input: IntentInput) -> None:
+        future = datetime(2026, 6, 21, 14, 0, tzinfo=UTC)
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "sol_azimuth_deg": 280.0,
+                "manual_override_until": future,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent == Intent.MANUAL_OVERRIDE
+
+    def test_override_beats_overcast(self, base_input: IntentInput) -> None:
+        future = datetime(2026, 6, 21, 14, 0, tzinfo=UTC)
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "cloud_coverage": 95.0,
+                "cloud_threshold": 80.0,
+                "manual_override_until": future,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent == Intent.MANUAL_OVERRIDE
+
+    def test_weather_safety_beats_override(self, base_input: IntentInput) -> None:
+        # Hard safety (rain/wind) must still retract even under a manual override.
+        future = datetime(2026, 6, 21, 14, 0, tzinfo=UTC)
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "raining": True,
+                "manual_override_until": future,
+            }
+        )
+        intent, _ = evaluate_intent(inp)
+        assert intent == Intent.INACTIVE_WEATHER
 
 
 class TestShadingIntent:

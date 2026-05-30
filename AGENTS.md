@@ -57,7 +57,7 @@ To execute tasks in parallel without merge collisions or overlapping efforts, fo
 ### Module Responsibilities
 *   `solar.py` — sun position and daily curve via astral. Pure functions where possible.
 *   `geometry.py` — cover position formulas (vertical, horizontal, tilt). Pure functions, no HA imports.
-*   `intent.py` — sequential gate model (elevation → FOV → weather → overcast/radiation → manual override). Returns intent enum + computed position.
+*   `intent.py` — sequential gate model (weather safety → manual override → elevation → FOV → overcast/radiation → shading). Returns intent enum + computed position. Manual override is evaluated after weather safety (so wind/rain can still retract) but before the comfort gates (so a user's manual position holds even when the sun dips below threshold, leaves the FOV, or it turns overcast).
 *   `coordinator.py` — orchestrates solar engine, intent model, entity state updates.
 *   `config_flow.py` — two-step flow: integration setup, then zone setup.
 *   `cover.py` — HA cover entity. Reads coordinator state, exposes observability attributes.
@@ -73,6 +73,8 @@ To execute tasks in parallel without merge collisions or overlapping efforts, fo
 *   Tilt formula NaN guard: when discriminant < 0, return 100% (fully closed).
 *   Elevation threshold defaults to `(90 - latitude) * 0.6`. Auto-computed, user-adjustable per zone.
 *   Compass bearing input (not "azimuth") — no magnetic declination correction in v1.
+*   Manual override outranks the comfort gates but not weather safety. While an override is active the coordinator holds the user's last-set position and never drives to the inactive rest position; wind/rain can still retract because the weather gate precedes override.
+*   Manual cover commands route through `coordinator.async_apply_manual_position`, which records `_last_commanded` and persists it. Never call `_command_covers` directly from the entity -- that leaves the committed baseline stale.
 
 ### Observability (non-negotiable)
 Every cover entity must expose `intent` as a string attribute. Valid values:
@@ -86,7 +88,7 @@ Every cover entity must expose `intent` as a string attribute. Valid values:
 ### Sensor Subscription Pattern
 The coordinator subscribes to weather + cloud + radiation entities via a single `async_track_state_change_event` call stored in `_unsub_sensors`. Any of the three changing triggers a refresh.
 
-### Cloud/Radiation Gate (Gate 4 in intent model)
+### Cloud/Radiation Gate (Gate 5 in intent model)
 *   Radiation takes precedence when both are configured: if `radiation < radiation_threshold` returns `INACTIVE_OVERCAST`.
 *   If only cloud is configured: if `cloud_coverage > cloud_threshold` returns `INACTIVE_OVERCAST`.
 *   Sensor reads use `_read_sensor()` helper — handles None entity_id, unavailable/unknown state, and non-numeric values gracefully.

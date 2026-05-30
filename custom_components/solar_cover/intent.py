@@ -56,23 +56,16 @@ def evaluate_intent(inp: IntentInput) -> tuple[Intent, float | None]:
     """Run the sequential gate model and return (intent, computed_position | None).
 
     Gates evaluated in order:
-    1. Elevation -- is sun high enough to shade?
-    2. FOV -- is sun in front of this opening?
-    3. Weather -- are conditions safe for deployment?
-    4. Overcast -- is solar radiation/cloud coverage too high to bother shading?
-    5. Manual override -- has user taken manual control?
+    1. Weather safety -- rain, high wind, or low temperature force retraction.
+    2. Manual override -- user has taken manual control. Holds against the
+       comfort gates below, but loses to weather safety above so wind/rain can
+       still retract for protection.
+    3. Elevation -- is sun high enough to shade?
+    4. FOV -- is sun in front of this opening?
+    5. Overcast -- is solar radiation/cloud coverage too high to bother shading?
     6. Shading -- compute geometry position.
     """
-    # Gate 1: elevation
-    if inp.sol_elev_deg <= inp.elevation_threshold:
-        return Intent.INACTIVE_SUN_LOW, None
-
-    # Gate 2: FOV
-    gamma = _gamma(inp.win_azimuth_deg, inp.sol_azimuth_deg)
-    if not (gamma < inp.fov_left and gamma > -inp.fov_right):
-        return Intent.INACTIVE_OUTSIDE_FOV, None
-
-    # Gate 3: weather
+    # Gate 1: weather safety -- must win over manual override
     if inp.raining:
         return Intent.INACTIVE_WEATHER, None
     if inp.wind_speed is not None and inp.wind_threshold is not None:
@@ -82,17 +75,26 @@ def evaluate_intent(inp: IntentInput) -> tuple[Intent, float | None]:
         if inp.outdoor_temp < inp.min_temp:
             return Intent.INACTIVE_WEATHER, None
 
-    # Gate 4: overcast / low radiation -- radiation wins when both are configured
+    # Gate 2: manual override -- holds the user's position against comfort gates
+    if inp.manual_override_until is not None and inp.now < inp.manual_override_until:
+        return Intent.MANUAL_OVERRIDE, None
+
+    # Gate 3: elevation
+    if inp.sol_elev_deg <= inp.elevation_threshold:
+        return Intent.INACTIVE_SUN_LOW, None
+
+    # Gate 4: FOV
+    gamma = _gamma(inp.win_azimuth_deg, inp.sol_azimuth_deg)
+    if not (gamma < inp.fov_left and gamma > -inp.fov_right):
+        return Intent.INACTIVE_OUTSIDE_FOV, None
+
+    # Gate 5: overcast / low radiation -- radiation wins when both are configured
     if inp.radiation is not None and inp.radiation_threshold is not None:
         if inp.radiation < inp.radiation_threshold:
             return Intent.INACTIVE_OVERCAST, None
     if inp.cloud_coverage is not None and inp.cloud_threshold is not None:
         if inp.cloud_coverage > inp.cloud_threshold:
             return Intent.INACTIVE_OVERCAST, None
-
-    # Gate 5: manual override
-    if inp.manual_override_until is not None and inp.now < inp.manual_override_until:
-        return Intent.MANUAL_OVERRIDE, None
 
     # Gate 6: shading -- compute position
     position = _compute_position(inp, gamma)
