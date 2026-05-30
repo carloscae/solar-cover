@@ -1,12 +1,12 @@
 {
   "domain": "solar_cover",
   "name": "Solar Cover",
-  "version": "0.3.6",
-  "config_flow": true,
-  "documentation": "https://github.com/carloscae/solar-cover",
-  "issue_tracker": "https://github.com/carloscae/solar-cover/issues",
-  "dependencies": [],
-  "requirements": [],
   "codeowners": ["@carloscae"],
-  "iot_class": "calculated"
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/carloscae/solar-cover",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/carloscae/solar-cover/issues",
+  "requirements": [],
+  "version": "0.3.7"
 }
