@@ -24,3 +24,6 @@ htmlcov/
 .vscode/
 .idea/
 *.swp
+
+# macOS
+.DS_Store
