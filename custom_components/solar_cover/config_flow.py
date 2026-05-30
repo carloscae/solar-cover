@@ -102,7 +102,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 "entry_type": ENTRY_TYPE_INTEGRATION,
                 **user_input,
             }
-            return self.async_create_entry(title="Solar Cover", data=data)
+            return self.async_create_entry(title="Global Settings", data=data)
 
         schema = vol.Schema(
             {
@@ -218,7 +218,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 if slat_spacing > slat_width:
                     errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
             if not errors:
-                title = str(self._zone_partial.get(CONF_NAME, "Cover Zone"))
+                title = f"Zone: {self._zone_partial.get(CONF_NAME, 'Cover Zone')}"
                 return self.async_create_entry(
                     title=title,
                     data={
