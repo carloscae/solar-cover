@@ -98,12 +98,10 @@ The coordinator subscribes to weather + cloud + radiation entities via a single 
 *   HA brands: not needed since HA 2026.3.0 -- brand icons are served from `custom_components/solar_cover/brand/icon.png` directly.
 *   HACS store listing icon: `icon.png` at repo root (256x256).
 
-### Release Process (manual -- no CI release automation)
-Releases are cut by hand. There is **no** GitHub Action that builds or publishes releases; only `validate.yml` (HACS + hassfest) runs on push. Each release is a GitHub release tagged `vX.Y.Z` with a `solar_cover.zip` asset that HACS downloads and extracts. To release:
-1.  Bump `"version"` in `custom_components/solar_cover/manifest.json` (semver: new feature -> minor, fix-only -> patch). Run `ruff format . && ruff check . && mypy custom_components/solar_cover && pytest tests/ -v` first -- everything must pass.
+### Release Process (automated via `.github/workflows/release.yml`)
+Releasing is **automatic on a version bump**. HACS installs the integration from the latest release **tag** (it pulls `custom_components/solar_cover/` from the tagged source). With the current minimal `hacs.json` (no `zip_release`/`filename`) HACS **ignores any release zip asset**, so no build/zip step is needed. To release:
+1.  Bump `"version"` in `custom_components/solar_cover/manifest.json` (semver: new feature -> minor, fix-only -> patch). Run `ruff format . && ruff check . && mypy custom_components/solar_cover && pytest tests/ -v` first -- everything must pass (there is no CI gate on tests, so verify locally before bumping).
 2.  Commit the bump (e.g. `chore: bump to X.Y.Z ...`) and `git push origin main`.
-3.  Build the asset from the repo root, preserving the `custom_components/solar_cover/` path (HACS extracts it into place):
-    `zip -r solar_cover.zip custom_components/solar_cover -x '*__pycache__*' '*.DS_Store' '*.pyc'`
-4.  `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..." solar_cover.zip`
-5.  Do **not** commit `solar_cover.zip` -- it is a release asset only. Delete the local copy afterward.
-*   Releasing is a user-visible publish action: confirm the version with the user before tagging.
+3.  The `Release` workflow fires on any push to `main` that touches `manifest.json`, reads the version, and -- if a `vX.Y.Z` release does not already exist -- creates the tag and a GitHub release with auto-generated notes. It is idempotent (a manifest change with an unchanged version is a no-op).
+*   Do **not** hand-create releases or build `solar_cover.zip` -- both are obsolete. The version bump is the single trigger.
+*   `workflow_dispatch` is enabled for manual re-runs if needed.
