@@ -39,6 +39,9 @@ from .const import (
     CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
+    CONF_STABILITY_DELAY,
+    CONF_STABILITY_DELAY_ON_RECOVERY,
+    CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_THRESHOLD,
@@ -47,6 +50,7 @@ from .const import (
     DEFAULT_HYSTERESIS,
     DEFAULT_INACTIVE_POSITION,
     DEFAULT_OVERRIDE_DURATION,
+    DEFAULT_STABILITY_DELAY,
     DOMAIN,
     ENTRY_TYPE_INTEGRATION,
     ENTRY_TYPE_ZONE,
@@ -173,6 +177,23 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                         unit_of_measurement="W/m²",
                     )
                 ),
+                vol.Optional(
+                    CONF_STABILITY_DELAY, default=DEFAULT_STABILITY_DELAY
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=60,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="min",
+                    )
+                ),
+                vol.Optional(
+                    CONF_STABILITY_DELAY_ON_WORSENING, default=True
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_STABILITY_DELAY_ON_RECOVERY, default=True
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="integration", data_schema=schema)
@@ -473,6 +494,23 @@ class IntegrationOptionsFlow(OptionsFlow):
                             unit_of_measurement="W/m²",
                         )
                     ),
+                    vol.Optional(
+                        CONF_STABILITY_DELAY, default=DEFAULT_STABILITY_DELAY
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=60,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
+                            unit_of_measurement="min",
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_STABILITY_DELAY_ON_WORSENING, default=True
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_STABILITY_DELAY_ON_RECOVERY, default=True
+                    ): selector.BooleanSelector(),
                 }
             ),
             {
@@ -490,6 +528,15 @@ class IntegrationOptionsFlow(OptionsFlow):
                 CONF_CLOUD_THRESHOLD: data.get(CONF_CLOUD_THRESHOLD),
                 CONF_RADIATION_ENTITY: data.get(CONF_RADIATION_ENTITY),
                 CONF_RADIATION_THRESHOLD: data.get(CONF_RADIATION_THRESHOLD),
+                CONF_STABILITY_DELAY: data.get(
+                    CONF_STABILITY_DELAY, DEFAULT_STABILITY_DELAY
+                ),
+                CONF_STABILITY_DELAY_ON_WORSENING: data.get(
+                    CONF_STABILITY_DELAY_ON_WORSENING, True
+                ),
+                CONF_STABILITY_DELAY_ON_RECOVERY: data.get(
+                    CONF_STABILITY_DELAY_ON_RECOVERY, True
+                ),
             },
         )
         return self.async_show_form(step_id="init", data_schema=schema)

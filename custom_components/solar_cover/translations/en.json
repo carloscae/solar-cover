@@ -13,7 +13,10 @@
           "cloud_entity": "Cloud coverage sensor (optional)",
           "cloud_threshold": "Cloud coverage threshold",
           "radiation_entity": "Solar radiation sensor (optional)",
-          "radiation_threshold": "Solar radiation threshold"
+          "radiation_threshold": "Solar radiation threshold",
+          "stability_delay_minutes": "Stability delay (minutes)",
+          "stability_delay_on_worsening": "Apply delay when conditions worsen",
+          "stability_delay_on_recovery": "Apply delay when conditions improve"
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
@@ -24,7 +27,10 @@
           "cloud_entity": "A sensor reporting cloud coverage as a percentage (0-100). Leave empty to skip. Example: sensor.openweathermap_cloud_coverage.",
           "cloud_threshold": "Covers stay retracted when cloud coverage is above this percentage. Useful when no radiation sensor is available.",
           "radiation_entity": "A sensor reporting solar irradiance in W/m². Leave empty to skip. Takes precedence over cloud coverage when both are configured. Example: sensor.zamg_global_radiation.",
-          "radiation_threshold": "Covers stay retracted when solar radiation is below this value (W/m²). A clear summer midday is typically 800-1000 W/m². Start with 120."
+          "radiation_threshold": "Covers stay retracted when solar radiation is below this value (W/m²). A clear summer midday is typically 800-1000 W/m². Start with 120.",
+          "stability_delay_minutes": "Wait this many minutes before reacting to a weather change, so covers don't open and close repeatedly on a partly-cloudy or gusty day. 0 disables the delay.",
+          "stability_delay_on_worsening": "Wait before retracting when conditions worsen (wind picks up, clouds roll in). Turn off to react immediately.",
+          "stability_delay_on_recovery": "Wait before re-deploying when conditions improve (sun returns). Turn off to react immediately."
         }
       },
       "zone": {
@@ -99,6 +105,9 @@
           "cloud_threshold": "Cloud coverage threshold",
           "radiation_entity": "Solar radiation sensor (optional)",
           "radiation_threshold": "Solar radiation threshold",
+          "stability_delay_minutes": "Stability delay (minutes)",
+          "stability_delay_on_worsening": "Apply delay when conditions worsen",
+          "stability_delay_on_recovery": "Apply delay when conditions improve",
           "cover_entities": "Cover devices",
           "cover_type": "Cover type",
           "azimuth": "Window compass bearing",
@@ -121,6 +130,9 @@
           "cloud_threshold": "Covers stay retracted when cloud coverage is above this percentage.",
           "radiation_entity": "A sensor reporting solar irradiance in W/m². Leave empty to skip. Takes precedence over cloud coverage when both are configured.",
           "radiation_threshold": "Covers stay retracted when solar radiation is below this value (W/m²). Start with 120.",
+          "stability_delay_minutes": "Wait this many minutes before reacting to a weather change, so covers don't open and close repeatedly on a partly-cloudy or gusty day. 0 disables the delay.",
+          "stability_delay_on_worsening": "Wait before retracting when conditions worsen (wind picks up, clouds roll in). Turn off to react immediately.",
+          "stability_delay_on_recovery": "Wait before re-deploying when conditions improve (sun returns). Turn off to react immediately.",
           "cover_entities": "The cover devices that move together in this zone.",
           "cover_type": "The physical type of cover determines which geometry is used.",
           "azimuth": "Compass direction your window faces (0=North, 90=East, 180=South, 270=West).",

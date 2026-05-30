@@ -95,8 +95,16 @@ else:
         _pending_since = None
         command covers
 
-    elif _pending_intent == new_intent:
-        # Already tracking this candidate
+    else:
+        # The clock measures time since we first diverged from the committed
+        # intent, NOT since this specific candidate appeared. A different
+        # candidate of the same delayed direction (e.g. overcast then wind,
+        # both "worsening" from SHADING) keeps the clock running so alternating
+        # sensors on a stormy day cannot pin the hold open forever. The clock
+        # only resets when we return to the committed intent (branch above).
+        if _pending_since is None:
+            _pending_since = now
+        _pending_intent = new_intent
         if (now - _pending_since) >= timedelta(minutes=stability_delay_minutes):
             # Delay elapsed — commit
             _last_intent = new_intent
@@ -104,12 +112,6 @@ else:
             _pending_since = None
             command covers
         # else: still waiting — do not command, hold last position
-
-    else:
-        # New candidate — start the clock
-        _pending_intent = new_intent
-        _pending_since = now
-        # do not command covers
 ```
 
 ### Timing note
@@ -141,6 +143,7 @@ approximate (within one update tick) which is acceptable for a comfort feature.
 4. **Worsening flag disabled** — worsening transition commits immediately; recovery transition is delayed.
 5. **Recovery flag disabled** — recovery commits immediately; worsening is delayed.
 6. **Direction "other"** (`INACTIVE_SUN_LOW` → `INACTIVE_OUTSIDE_FOV`) — always commits immediately regardless of flags.
+7. **Candidate changes mid-hold** — a different same-direction candidate keeps the clock running (origin unchanged); commit still fires at the original divergence + delay.
 
 ### Config flow tests
 

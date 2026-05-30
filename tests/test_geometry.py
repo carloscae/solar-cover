@@ -118,7 +118,9 @@ class TestHorizontalPosition:
 
 class TestTiltPosition:
     def test_midday_summer(self) -> None:
-        # Sun at 60 deg, gamma=0, 80mm slat, 50mm spacing, single range
+        # Sun at 60 deg, gamma=0, 80mm slat, 50mm spacing, single range.
+        # beta=60 deg, ratio=0.625 -> slat angle ~131.8 deg over a 90 deg range
+        # -> clamps to fully closed.
         result = tilt_position(
             sol_elev_deg=60.0,
             gamma_deg=0.0,
@@ -126,7 +128,19 @@ class TestTiltPosition:
             slat_spacing_mm=50.0,
             bidirectional=False,
         )
-        assert 0.0 <= result <= 100.0
+        assert result == 100.0
+
+    def test_low_elevation_winter(self) -> None:
+        # Sun at 15 deg, gamma=0, 80mm slat, 50mm spacing, single range.
+        # Low winter sun needs a partial tilt to block, not full closure.
+        result = tilt_position(
+            sol_elev_deg=15.0,
+            gamma_deg=0.0,
+            slat_width_mm=80.0,
+            slat_spacing_mm=50.0,
+            bidirectional=False,
+        )
+        assert abs(result - 75.4) < 0.5
 
     def test_bidirectional_range(self) -> None:
         # Bidirectional should produce exactly half the single-direction % for

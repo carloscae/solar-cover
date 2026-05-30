@@ -82,7 +82,7 @@ def evaluate_intent(inp: IntentInput) -> tuple[Intent, float | None]:
         if inp.outdoor_temp < inp.min_temp:
             return Intent.INACTIVE_WEATHER, None
 
-    # Gate 4: overcast / low radiation -- radiation takes precedence when both configured
+    # Gate 4: overcast / low radiation -- radiation wins when both are configured
     if inp.radiation is not None and inp.radiation_threshold is not None:
         if inp.radiation < inp.radiation_threshold:
             return Intent.INACTIVE_OVERCAST, None

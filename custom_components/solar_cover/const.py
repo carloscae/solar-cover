@@ -17,6 +17,9 @@ CONF_CLOUD_ENTITY = "cloud_entity"
 CONF_CLOUD_THRESHOLD = "cloud_threshold"
 CONF_RADIATION_ENTITY = "radiation_entity"
 CONF_RADIATION_THRESHOLD = "radiation_threshold"
+CONF_STABILITY_DELAY = "stability_delay_minutes"
+CONF_STABILITY_DELAY_ON_WORSENING = "stability_delay_on_worsening"
+CONF_STABILITY_DELAY_ON_RECOVERY = "stability_delay_on_recovery"
 
 # Zone config keys
 CONF_COVER_ENTITIES = "cover_entities"
@@ -71,5 +74,6 @@ class Intent(StrEnum):
 DEFAULT_INACTIVE_POSITION: int = 0
 DEFAULT_OVERRIDE_DURATION: int = 120
 DEFAULT_HYSTERESIS: float = 3.0
+DEFAULT_STABILITY_DELAY: int = 0
 DEFAULT_ELEVATION_THRESHOLD_FACTOR: float = 0.6
 UPDATE_INTERVAL_MINUTES: int = 5

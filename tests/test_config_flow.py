@@ -21,6 +21,9 @@ from custom_components.solar_cover.const import (
     CONF_GLARE_DEPTH,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
+    CONF_STABILITY_DELAY,
+    CONF_STABILITY_DELAY_ON_RECOVERY,
+    CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
     CONF_WINDOW_HEIGHT,
     DOMAIN,
@@ -107,6 +110,27 @@ class TestIntegrationStep:
         )
         assert result2["type"] == FlowResultType.CREATE_ENTRY
         assert result2["data"]["entry_type"] == ENTRY_TYPE_INTEGRATION
+
+    async def test_creates_integration_entry_with_stability_fields(
+        self, hass: HomeAssistant
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        user_input = {
+            CONF_STABILITY_DELAY: 20,
+            CONF_STABILITY_DELAY_ON_WORSENING: True,
+            CONF_STABILITY_DELAY_ON_RECOVERY: False,
+        }
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=user_input
+        )
+        assert result2["type"] == FlowResultType.CREATE_ENTRY
+        assert result2["data"][CONF_STABILITY_DELAY] == 20
+        assert result2["data"][CONF_STABILITY_DELAY_ON_WORSENING] is True
+        assert result2["data"][CONF_STABILITY_DELAY_ON_RECOVERY] is False
 
 
 class TestZoneStep:
@@ -264,3 +288,42 @@ class TestZoneConfigureStep:
         )
         assert result3["type"] == FlowResultType.FORM
         assert CONF_SLAT_SPACING in result3.get("errors", {})
+
+
+class TestIntegrationOptionsFlow:
+    async def test_stability_fields_round_trip(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.options.async_init(
+            integration_entry.entry_id
+        )
+        assert result["type"] == FlowResultType.FORM
+
+        user_input = {
+            CONF_STABILITY_DELAY: 15,
+            CONF_STABILITY_DELAY_ON_WORSENING: False,
+            CONF_STABILITY_DELAY_ON_RECOVERY: True,
+        }
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input=user_input
+        )
+        assert result2["type"] == FlowResultType.CREATE_ENTRY
+        assert result2["data"][CONF_STABILITY_DELAY] == 15
+        assert result2["data"][CONF_STABILITY_DELAY_ON_WORSENING] is False
+        assert result2["data"][CONF_STABILITY_DELAY_ON_RECOVERY] is True
+
+    async def test_stability_delay_zero_round_trips(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.options.async_init(
+            integration_entry.entry_id
+        )
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input={CONF_STABILITY_DELAY: 0}
+        )
+        assert result2["type"] == FlowResultType.CREATE_ENTRY
+        assert result2["data"][CONF_STABILITY_DELAY] == 0

@@ -39,12 +39,16 @@ from .const import (
     CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
+    CONF_STABILITY_DELAY,
+    CONF_STABILITY_DELAY_ON_RECOVERY,
+    CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
     CONF_WEATHER_ENTITY,
     CONF_WIND_THRESHOLD,
     CONF_WINDOW_HEIGHT,
     DEFAULT_HYSTERESIS,
     DEFAULT_INACTIVE_POSITION,
+    DEFAULT_STABILITY_DELAY,
     DOMAIN,
     UPDATE_INTERVAL_MINUTES,
     CoverType,
@@ -109,10 +113,13 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._solar = solar_engine
         self._last_commanded: float | None = None
         self._last_intent: Intent | None = None
+        self._last_computed_position: float | None = None
+        self._pending_intent: Intent | None = None
+        self._pending_since: datetime | None = None
         self._enabled: bool = True
         self._manual_override_until: datetime | None = None
         self._unsub_sensors: Any = None
-        self._store: Store = Store(hass, 1, f"solar_cover.{entry_id}")
+        self._store: Store[dict[str, Any]] = Store(hass, 1, f"solar_cover.{entry_id}")
 
         watch = [
             e
@@ -140,6 +147,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable automation. Triggers an immediate coordinator refresh."""
         self._enabled = enabled
+        # Drop any in-flight stability hold so re-enabling starts from a clean slate.
+        self._pending_intent = None
+        self._pending_since = None
         self.hass.async_create_task(self.async_request_refresh())
 
     async def async_restore_state(self) -> None:
@@ -242,25 +252,43 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
             )
         )
-        intent_changed = intent != self._last_intent
-        self._last_intent = intent
-        last = self._last_commanded
-        delta: float | None = abs(clamped - last) if last is not None else None
 
-        # Only command covers when: automation enabled, sun is above the horizon,
-        # and either intent changed or the position shift exceeds hysteresis.
-        # Suppressing commands below the horizon prevents an HA restart at night
-        # from re-opening covers the user closed manually.
-        above_horizon = sol_el > 0
-        if (
-            self._enabled
-            and above_horizon
-            and (delta is None or delta >= hysteresis or intent_changed)
-        ):
-            await self._command_covers(clamped)
-            self._last_commanded = clamped
-            await self._store.async_save({"last_commanded": clamped})
+        # Stability delay: an intent change is only acted on once the new intent
+        # has held continuously for the configured number of minutes. This damps
+        # cover oscillation on partly-cloudy or gusty days where sensors flip
+        # across a threshold repeatedly.
+        prev_committed = self._last_intent
+        should_commit = self._evaluate_stability(intent, now)
 
+        if should_commit:
+            intent_changed = intent != prev_committed
+            self._last_intent = intent
+            self._last_computed_position = computed_pos
+            last = self._last_commanded
+            delta: float | None = abs(clamped - last) if last is not None else None
+
+            # Only command covers when: automation enabled, sun is above the
+            # horizon, and either intent changed or the position shift exceeds
+            # hysteresis. Suppressing commands below the horizon prevents an HA
+            # restart at night from re-opening covers the user closed manually.
+            above_horizon = sol_el > 0
+            if (
+                self._enabled
+                and above_horizon
+                and (delta is None or delta >= hysteresis or intent_changed)
+            ):
+                await self._command_covers(clamped)
+                self._last_commanded = clamped
+                await self._store.async_save({"last_commanded": clamped})
+
+        # Expose the last committed intent/position -- a pending candidate that
+        # has not held long enough is internal state only.
+        effective_intent: Intent = (
+            self._last_intent if self._last_intent is not None else intent
+        )
+        effective_computed: float | None = (
+            computed_pos if should_commit else self._last_computed_position
+        )
         commanded: float = (
             self._last_commanded if self._last_commanded is not None else clamped
         )
@@ -276,8 +304,8 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         return CoordinatorData(
-            intent=intent,
-            computed_position=computed_pos,
+            intent=effective_intent,
+            computed_position=effective_computed,
             commanded_position=commanded,
             sun_azimuth=sol_az,
             sun_elevation=sol_el,
@@ -286,6 +314,74 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             fov_entry=entry.isoformat() if entry else None,
             fov_exit=exit_.isoformat() if exit_ else None,
         )
+
+    def _evaluate_stability(self, new_intent: Intent, now: datetime) -> bool:
+        """Decide whether ``new_intent`` should be acted on now.
+
+        Returns True to commit (and clears pending state), False to hold the
+        last committed intent until the candidate has persisted long enough.
+        Mutates ``_pending_intent`` / ``_pending_since`` as a side effect.
+        """
+        if new_intent == self._last_intent:
+            self._pending_intent = None
+            self._pending_since = None
+            return True
+
+        delay = int(
+            self._integration.get(CONF_STABILITY_DELAY, DEFAULT_STABILITY_DELAY)
+        )
+        if delay <= 0:
+            self._pending_intent = None
+            self._pending_since = None
+            return True
+
+        direction = self._classify_transition(new_intent)
+        delay_on_worsening = bool(
+            self._integration.get(CONF_STABILITY_DELAY_ON_WORSENING, True)
+        )
+        delay_on_recovery = bool(
+            self._integration.get(CONF_STABILITY_DELAY_ON_RECOVERY, True)
+        )
+        delay_applies = (direction == "worsening" and delay_on_worsening) or (
+            direction == "recovery" and delay_on_recovery
+        )
+        if not delay_applies:
+            self._pending_intent = None
+            self._pending_since = None
+            return True
+
+        # Measure time since we first diverged from the committed intent, not
+        # since this specific candidate appeared. A different candidate of the
+        # same delayed direction (e.g. overcast then wind, both "worsening" from
+        # SHADING) keeps the clock running so alternating sensors cannot pin the
+        # hold open forever. The clock only resets when we return to the
+        # committed intent (handled by the equality branch above).
+        if self._pending_since is None:
+            self._pending_since = now
+        self._pending_intent = new_intent
+        if now - self._pending_since >= timedelta(minutes=delay):
+            self._pending_intent = None
+            self._pending_since = None
+            return True
+        return False
+
+    def _classify_transition(self, new_intent: Intent) -> str:
+        """Classify an intent transition as worsening, recovery, or other."""
+        last = self._last_intent
+        inactive = (
+            Intent.INACTIVE_SUN_LOW,
+            Intent.INACTIVE_OUTSIDE_FOV,
+            Intent.INACTIVE_WEATHER,
+            Intent.INACTIVE_OVERCAST,
+        )
+        if last == Intent.SHADING and new_intent in inactive:
+            return "worsening"
+        if (
+            last in (Intent.INACTIVE_OVERCAST, Intent.INACTIVE_WEATHER)
+            and new_intent == Intent.SHADING
+        ):
+            return "recovery"
+        return "other"
 
     def _read_sensor(self, entity_id: str | None) -> float | None:
         """Read a numeric sensor state; return None if unavailable or not configured."""

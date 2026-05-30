@@ -106,9 +106,7 @@ class TestOvercastGate:
         assert intent == Intent.INACTIVE_OVERCAST
         assert position is None
 
-    def test_radiation_above_threshold_continues(
-        self, base_input: IntentInput
-    ) -> None:
+    def test_radiation_above_threshold_continues(self, base_input: IntentInput) -> None:
         inp = IntentInput(
             **{**base_input.__dict__, "radiation": 500.0, "radiation_threshold": 120.0}
         )
@@ -169,9 +167,7 @@ class TestOvercastGate:
         intent, _ = evaluate_intent(base_input)
         assert intent != Intent.INACTIVE_OVERCAST
 
-    def test_sensor_without_threshold_skips_gate(
-        self, base_input: IntentInput
-    ) -> None:
+    def test_sensor_without_threshold_skips_gate(self, base_input: IntentInput) -> None:
         # Entity configured but threshold not set -- gate is skipped
         inp = IntentInput(**{**base_input.__dict__, "radiation": 50.0})
         intent, _ = evaluate_intent(inp)

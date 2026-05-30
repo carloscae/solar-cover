@@ -73,7 +73,7 @@ def horizontal_position(
     a_angle = math.pi / 2.0 - sol_elev
     c_angle = sol_elev + awn_angle
 
-    if math.sin(c_angle) == 0.0:
+    if abs(math.sin(c_angle)) < 1e-9:
         return 0.0
 
     length = ((h_win - blind_height) * math.sin(a_angle)) / math.sin(c_angle)
