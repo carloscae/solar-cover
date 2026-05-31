@@ -13,6 +13,7 @@ from custom_components.solar_cover.const import (
     Intent,
 )
 from custom_components.solar_cover.coordinator import SolarCoverCoordinator
+from custom_components.solar_cover.intent import IntentResult
 
 
 def _make_coordinator(
@@ -249,10 +250,10 @@ class TestStabilityEndToEnd:
         coord.hass.services.async_call = AsyncMock()
 
         intents = [
-            (Intent.SHADING, 50.0),
-            (Intent.INACTIVE_OVERCAST, 0.0),
-            (Intent.INACTIVE_OVERCAST, 0.0),
-            (Intent.INACTIVE_OVERCAST, 0.0),
+            IntentResult(Intent.SHADING, 50.0, "Shading", []),
+            IntentResult(Intent.INACTIVE_OVERCAST, None, "Idle (overcast)", []),
+            IntentResult(Intent.INACTIVE_OVERCAST, None, "Idle (overcast)", []),
+            IntentResult(Intent.INACTIVE_OVERCAST, None, "Idle (overcast)", []),
         ]
         times = [
             _T0,
@@ -276,10 +277,13 @@ class TestStabilityEndToEnd:
             assert coord.hass.services.async_call.await_count == 1
 
             # Worsening candidate arrives -- held, no new command, snapshot
-            # still reports the committed SHADING intent.
+            # still reports the committed SHADING intent. The pending timer is
+            # now surfaced with the candidate that is waiting to commit.
             data = await coord._async_update_data()
             assert data.intent == Intent.SHADING
             assert coord.hass.services.async_call.await_count == 1
+            assert data.stability_pending_until is not None
+            assert data.pending_intent == Intent.INACTIVE_OVERCAST.value
 
             # Still within the window -- keep holding.
             data = await coord._async_update_data()
@@ -287,6 +291,9 @@ class TestStabilityEndToEnd:
             assert coord.hass.services.async_call.await_count == 1
 
             # Delay elapsed -- commit the overcast intent and command the cover.
+            # The pending timer clears once the candidate is committed.
             data = await coord._async_update_data()
             assert data.intent == Intent.INACTIVE_OVERCAST
             assert coord.hass.services.async_call.await_count == 2
+            assert data.stability_pending_until is None
+            assert data.pending_intent is None

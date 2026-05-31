@@ -7,12 +7,11 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN
-from .coordinator import SolarCoverCoordinator
+from .coordinator import SolarCoverCoordinator, zone_device_info
 
 
 async def async_setup_entry(
@@ -43,11 +42,7 @@ class SolarCoverSwitch(SwitchEntity, RestoreEntity):
     def __init__(self, coordinator: SolarCoverCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_automation_enabled"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Solar Cover",
-        )
+        self._attr_device_info = zone_device_info(entry)
 
     async def async_added_to_hass(self) -> None:
         """Restore enabled state from last known state on HA startup."""

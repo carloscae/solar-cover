@@ -33,6 +33,11 @@ def _make_coordinator_data(
     gamma: float = 15.5,
     fov_entry: str | None = "2026-05-28T08:30:00+00:00",
     fov_exit: str | None = "2026-05-28T17:45:00+00:00",
+    reason: str = "Shading: sun 42.7° elevation, 15.5° off-axis, target 65%",
+    reason_detail: list[dict[str, object]] | None = None,
+    stability_pending_until: str | None = None,
+    pending_intent: str | None = None,
+    manual_override_until: str | None = None,
 ) -> CoordinatorData:
     return CoordinatorData(
         intent=intent,
@@ -44,6 +49,11 @@ def _make_coordinator_data(
         position_curve=[],
         fov_entry=fov_entry,
         fov_exit=fov_exit,
+        reason=reason,
+        reason_detail=reason_detail if reason_detail is not None else [],
+        stability_pending_until=stability_pending_until,
+        pending_intent=pending_intent,
+        manual_override_until=manual_override_until,
     )
 
 
@@ -85,6 +95,8 @@ class TestSensorDescriptions:
             "computed_position",
             "fov_entry",
             "fov_exit",
+            "stability_pending_until",
+            "manual_override_until",
         }
         assert keys == expected
 
@@ -172,6 +184,35 @@ class TestSensorValueFunctions:
     def test_fov_entry_returns_none_when_none(self) -> None:
         data = _make_coordinator_data(fov_entry=None)
         result = self._get_desc("fov_entry").value_fn(data)
+        assert result is None
+
+    def test_stability_pending_until_returns_datetime_when_set(self) -> None:
+        data = _make_coordinator_data(
+            stability_pending_until="2026-05-28T12:05:00+00:00"
+        )
+        result = self._get_desc("stability_pending_until").value_fn(data)
+        assert isinstance(result, datetime)
+        assert result.tzinfo is not None
+
+    def test_stability_pending_until_returns_none_when_unset(self) -> None:
+        data = _make_coordinator_data(stability_pending_until=None)
+        result = self._get_desc("stability_pending_until").value_fn(data)
+        assert result is None
+
+    def test_stability_pending_until_exposes_pending_intent_attr(self) -> None:
+        data = _make_coordinator_data(pending_intent="inactive_overcast")
+        attrs = self._get_desc("stability_pending_until").attr_fn(data)
+        assert attrs == {"pending_intent": "inactive_overcast"}
+
+    def test_manual_override_until_returns_datetime_when_set(self) -> None:
+        data = _make_coordinator_data(manual_override_until="2026-05-28T14:00:00+00:00")
+        result = self._get_desc("manual_override_until").value_fn(data)
+        assert isinstance(result, datetime)
+        assert result.tzinfo is not None
+
+    def test_manual_override_until_returns_none_when_unset(self) -> None:
+        data = _make_coordinator_data(manual_override_until=None)
+        result = self._get_desc("manual_override_until").value_fn(data)
         assert result is None
 
 

@@ -13,7 +13,7 @@ from .const import (
 from .coordinator import SolarCoverCoordinator
 from .solar import SolarEngine
 
-PLATFORMS_ZONE = ["cover", "sensor", "switch"]
+PLATFORMS_ZONE = ["button", "cover", "sensor", "switch"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

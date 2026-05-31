@@ -12,7 +12,6 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -22,7 +21,7 @@ from .const import (
     DEFAULT_OVERRIDE_DURATION,
     DOMAIN,
 )
-from .coordinator import SolarCoverCoordinator
+from .coordinator import SolarCoverCoordinator, zone_device_info
 
 
 async def async_setup_entry(
@@ -56,11 +55,7 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
         self._integration_data = integration_data
         self._attr_unique_id = entry.entry_id
         self._attr_device_class = CoverDeviceClass.BLIND
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Solar Cover",
-        )
+        self._attr_device_info = zone_device_info(entry)
 
     @property
     def is_closed(self) -> bool | None:
@@ -86,6 +81,8 @@ class SolarCoverEntity(CoordinatorEntity[SolarCoverCoordinator], CoverEntity):
             return {}
         return {
             "intent": str(data.intent),
+            "reason": data.reason,
+            "reason_detail": data.reason_detail,
             "sun_azimuth": round(data.sun_azimuth, 1),
             "sun_elevation": round(data.sun_elevation, 1),
             "surface_azimuth": round(data.gamma, 1),

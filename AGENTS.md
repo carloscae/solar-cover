@@ -12,7 +12,9 @@ This is the single source of truth for repository guidelines, developer commands
 *   **Type check**: `mypy custom_components/solar_cover`
 *   **Test suite**: `pytest tests/ -v`
 *   **Test with coverage**: `pytest tests/ --cov=custom_components/solar_cover --cov-report=term-missing`
-*   **Install dev deps**: `pip install -e ".[dev]"`
+*   **Install dev deps**: `pip install -e ".[dev]" --config-settings editable_mode=compat`
+    *   The `editable_mode=compat` flag is **required**: the default PEP 660 editable install creates an `__editable__.*finder.__path_hook__` entry that Home Assistant's integration loader trips over (`FileNotFoundError` during config-flow/platform tests). Compat mode writes a plain `.pth` instead. Plain `pip install -e ".[dev]"` resolves fine but the HA-integration tests will fail without this flag.
+    *   Do not pin `pytest`, `pytest-asyncio`, `numpy`, or `astral` in `[dev]`: `pytest-homeassistant-custom-component` and `homeassistant` pin those exactly, and independent pins dead-end the resolver. The PHACC floor is kept high on purpose (old releases pin `pytest-asyncio==0.23.4`/`pytest<8`).
 
 ### Repository Layout
 ```
@@ -79,6 +81,18 @@ To execute tasks in parallel without merge collisions or overlapping efforts, fo
 ### Observability (non-negotiable)
 Every cover entity must expose `intent` as a string attribute. Valid values:
 `shading`, `inactive_sun_low`, `inactive_outside_fov`, `inactive_weather`, `inactive_overcast`, `manual_override`
+
+The `intent` enum is fixed (the contract above). Finer detail is **additive**, alongside it:
+*   `reason` (cover attr) -- a human sentence, e.g. `"Retracted (weather): raining; wind 45 km/h exceeds 40 km/h limit"`.
+*   `reason_detail` (cover attr) -- a list of trigger dicts `{code, text, measured, threshold, unit, margin}` for templating/automations. `margin = measured - threshold` (signed). The weather gate reports **all** active triggers (rain + wind + cold), not just the first.
+*   `ReasonCode` (in `const.py`) enumerates the sub-codes: `weather_rain`, `weather_wind`, `weather_cold`, `sun_low`, `fov_left`, `fov_right`, `overcast_radiation`, `overcast_cloud`, `manual_override`, `shading`.
+*   `evaluate_intent` returns an `IntentResult(intent, position, reason, triggers)` -- all reason text is built in the pure `intent.py` so it stays HA-free and unit-testable. The coordinator stores `_last_reason`/`_last_triggers` so the exposed `reason` always tracks the **committed** intent during a stability hold (never disagrees with `intent`).
+
+Two diagnostic **timestamp** sensors surface the internal timers (HA renders relative time, value `None` when inactive):
+*   `stability_pending_until` -- when a held intent change will commit; carries a `pending_intent` extra attribute naming the waiting candidate.
+*   `manual_override_until` -- when the active manual hold expires.
+
+A diagnostic **button** (`reset_timers`, `button.py`) calls `coordinator.reset_timers()`, which clears both the stability hold and the manual override so the live evaluation takes over on the next refresh. `set_enabled`, `clear_manual_override`, and `async_apply_manual_position` share the `_clear_pending()` helper.
 
 ### Config Entry Titles (enforced at startup)
 *   Integration entry title: `"Global Settings"`

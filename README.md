@@ -129,9 +129,13 @@ Stand inside your room and face the window directly. Open the compass app on you
 
 Each zone creates a device with the following entities:
 
-### Switch — Automation active
+### Switch - Automation active
 
 Turns automation on or off for this zone. When off, covers stay wherever they are and Solar Cover stops sending commands. The switch state survives restarts.
+
+### Button - Reset timers
+
+Clears both internal timers at once - the stability hold and any manual override - so the current solar decision takes effect immediately, without waiting out a delay or a hold. Handy while you are tuning settings.
 
 ### Sensors (diagnostic)
 
@@ -146,10 +150,17 @@ These are visible in the device page and useful for understanding what the syste
 | **Calculated position** | The position the geometry says the cover should be at (%) |
 | **Sun enters window** | The time today when the sun first starts shining into this window |
 | **Sun leaves window** | The time today when the sun stops shining into this window |
+| **Pending change commits** | When a delayed intent change will take effect (only while a stability delay is counting down). Shows what is waiting in its `pending_intent` attribute. |
+| **Manual hold expires** | When an active manual override will end and automation resumes |
 
 ### Cover entity
 
 The cover entity reflects the last position Solar Cover commanded. You can also use it in your own automations or dashboards.
+
+Besides `intent`, it exposes two attributes that explain the current decision in detail:
+
+- **`reason`** - a plain-language sentence, e.g. `Retracted (weather): raining; wind 45 km/h exceeds 40 km/h limit`. Put it on a dashboard card to always see why the cover is where it is.
+- **`reason_detail`** - a structured list of the exact conditions that fired, each with the measured value, your threshold, the unit, and the margin (how far over or under). Ideal for templates and automations. When more than one condition applies (for example rain *and* high wind), every one is listed - so you know all the settings worth adjusting, not just the first.
 
 ---
 
@@ -165,6 +176,8 @@ The **Active intent** sensor always shows you exactly what Solar Cover is doing 
 | **Retracted - weather** | Covers are held open due to rain, wind, or cold temperature |
 | **Retracted - overcast** | Cloud coverage or low radiation means there is no meaningful sunlight to block |
 | **Manual override** | You moved a cover by hand recently. Automation is paused until the override timer runs out. |
+
+The intent state tells you the *category*; the cover's **`reason`** and **`reason_detail`** attributes (above) tell you the *specifics* - which exact condition fired and by how much. So "Retracted - weather" becomes "wind 45 km/h exceeds 40 km/h limit", and you can see at a glance whether to raise your wind threshold or leave it.
 
 ---
 
@@ -192,6 +205,8 @@ Solar Cover checks a series of conditions in order. The first one that triggers 
 **The radiation threshold is your best overcast filter.** If you have a local weather station with a radiation sensor, set the threshold to around 120 W/m². Below that, the sun is not strong enough to cause meaningful glare even if it is technically above the horizon.
 
 **Manual override is intentional.** When you move a cover by hand, Solar Cover steps back for the duration you configured. After that, it resumes. You do not need to remember to turn automation back on.
+
+**Tune with the reason in view.** When a cover is not where you expect, read the cover's `reason` attribute - it names the exact condition and the numbers behind it. Adjust the matching threshold, then press **Reset timers** to apply your change at once instead of waiting out a stability delay or a manual hold.
 
 ---
 

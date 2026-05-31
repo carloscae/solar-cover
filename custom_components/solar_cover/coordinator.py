@@ -10,8 +10,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -65,6 +67,15 @@ _COVER_DOMAIN = "cover"
 _SERVICE_SET_COVER_POSITION = "set_cover_position"
 
 
+def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
+    """Shared device descriptor for every entity belonging to a zone."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        manufacturer="Solar Cover",
+    )
+
+
 class CoordinatorData:
     """Snapshot of coordinator state, shared with entities as attributes."""
 
@@ -79,6 +90,11 @@ class CoordinatorData:
         position_curve: list[dict[str, Any]],
         fov_entry: str | None,
         fov_exit: str | None,
+        reason: str,
+        reason_detail: list[dict[str, Any]],
+        stability_pending_until: str | None,
+        pending_intent: str | None,
+        manual_override_until: str | None,
     ) -> None:
         self.intent = intent
         self.computed_position = computed_position
@@ -89,6 +105,11 @@ class CoordinatorData:
         self.position_curve = position_curve
         self.fov_entry = fov_entry
         self.fov_exit = fov_exit
+        self.reason = reason
+        self.reason_detail = reason_detail
+        self.stability_pending_until = stability_pending_until
+        self.pending_intent = pending_intent
+        self.manual_override_until = manual_override_until
 
 
 class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -114,6 +135,8 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._last_commanded: float | None = None
         self._last_intent: Intent | None = None
         self._last_computed_position: float | None = None
+        self._last_reason: str = ""
+        self._last_triggers: list[dict[str, Any]] = []
         self._pending_intent: Intent | None = None
         self._pending_since: datetime | None = None
         self._enabled: bool = True
@@ -140,6 +163,11 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self.hass.async_create_task(self.async_request_refresh())
 
     @property
+    def _stability_delay(self) -> int:
+        """Configured stability delay in minutes (0 = feature disabled)."""
+        return int(self._integration.get(CONF_STABILITY_DELAY, DEFAULT_STABILITY_DELAY))
+
+    @property
     def enabled(self) -> bool:
         """Return whether automation is active for this zone."""
         return self._enabled
@@ -148,9 +176,13 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Enable or disable automation. Triggers an immediate coordinator refresh."""
         self._enabled = enabled
         # Drop any in-flight stability hold so re-enabling starts from a clean slate.
+        self._clear_pending()
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def _clear_pending(self) -> None:
+        """Drop any in-flight stability hold."""
         self._pending_intent = None
         self._pending_since = None
-        self.hass.async_create_task(self.async_request_refresh())
 
     async def async_restore_state(self) -> None:
         """Load persisted last-commanded position from storage."""
@@ -222,7 +254,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             tilt_range=TiltRange(self._zone.get(CONF_TILT_RANGE, TiltRange.SINGLE)),
         )
 
-        intent, computed_pos = evaluate_intent(inp)
+        result = evaluate_intent(inp)
+        intent = result.intent
+        computed_pos = result.position
 
         # Resolve final position
         inactive_pos = self._zone.get(
@@ -264,6 +298,8 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             intent_changed = intent != prev_committed
             self._last_intent = intent
             self._last_computed_position = computed_pos
+            self._last_reason = result.reason
+            self._last_triggers = [t.to_dict() for t in result.triggers]
             last = self._last_commanded
             delta: float | None = abs(clamped - last) if last is not None else None
 
@@ -285,16 +321,41 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._last_commanded = clamped
                 await self._store.async_save({"last_commanded": clamped})
 
-        # Expose the last committed intent/position -- a pending candidate that
-        # has not held long enough is internal state only.
+        # Expose the last committed intent/position/reason -- a pending candidate
+        # that has not held long enough is internal state only. The reason must
+        # track the committed intent so the two never disagree on the panel.
         effective_intent: Intent = (
             self._last_intent if self._last_intent is not None else intent
         )
         effective_computed: float | None = (
             computed_pos if should_commit else self._last_computed_position
         )
+        # _last_reason / _last_triggers were already updated to the current
+        # result inside the should_commit block, so they hold the committed
+        # values in both branches -- no need to re-serialise here.
+        effective_reason: str = self._last_reason
+        effective_triggers: list[dict[str, Any]] = self._last_triggers
         commanded: float = (
             self._last_commanded if self._last_commanded is not None else clamped
+        )
+
+        # Timer visibility: when a stability hold is active, surface when the
+        # pending change will commit and what it is; otherwise None.
+        stability_pending_until: str | None = None
+        pending_intent: str | None = None
+        if self._pending_since is not None:
+            stability_pending_until = (
+                self._pending_since + timedelta(minutes=self._stability_delay)
+            ).isoformat()
+            pending_intent = (
+                str(self._pending_intent) if self._pending_intent is not None else None
+            )
+
+        manual_until = self._manual_override_until
+        manual_override_until: str | None = (
+            manual_until.isoformat()
+            if manual_until is not None and now < manual_until
+            else None
         )
 
         # Build hourly curve for entity attribute
@@ -317,6 +378,11 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             position_curve=[dict(s) for s in curve],
             fov_entry=entry.isoformat() if entry else None,
             fov_exit=exit_.isoformat() if exit_ else None,
+            reason=effective_reason,
+            reason_detail=effective_triggers,
+            stability_pending_until=stability_pending_until,
+            pending_intent=pending_intent,
+            manual_override_until=manual_override_until,
         )
 
     def _evaluate_stability(self, new_intent: Intent, now: datetime) -> bool:
@@ -331,9 +397,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._pending_since = None
             return True
 
-        delay = int(
-            self._integration.get(CONF_STABILITY_DELAY, DEFAULT_STABILITY_DELAY)
-        )
+        delay = self._stability_delay
         if delay <= 0:
             self._pending_intent = None
             self._pending_since = None
@@ -420,13 +484,30 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         covers directly without this would leave ``_last_commanded`` stale.
         """
         self._manual_override_until = until
-        self._pending_intent = None
-        self._pending_since = None
+        self._clear_pending()
         await self._command_covers(position)
         self._last_commanded = position
         await self._store.async_save({"last_commanded": position})
         self.hass.async_create_task(self.async_request_refresh())
 
     def clear_manual_override(self) -> None:
+        self._manual_override_until = None
+        self._clear_pending()
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def reset_timers(self) -> None:
+        """Clear both the stability hold and the manual override.
+
+        After this the current live evaluation takes effect on the next refresh
+        -- no waiting out a stability delay or a manual hold. Dropping the
+        committed intent (``_last_intent``) as well is essential: clearing only
+        the pending state would let the next refresh immediately re-open a fresh
+        hold for the same still-pending transition (it is still a "worsening"/
+        "recovery" change relative to the old committed intent), which would
+        merely restart the delay. With no committed intent the next transition
+        classifies as "other" and commits at once.
+        """
+        self._clear_pending()
+        self._last_intent = None
         self._manual_override_until = None
         self.hass.async_create_task(self.async_request_refresh())

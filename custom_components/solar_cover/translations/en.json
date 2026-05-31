@@ -199,6 +199,11 @@
         "name": "Automation active"
       }
     },
+    "button": {
+      "reset_timers": {
+        "name": "Reset timers"
+      }
+    },
     "sensor": {
       "intent": {
         "name": "Active intent",
@@ -216,7 +221,9 @@
       "surface_azimuth": { "name": "Sun angle to window" },
       "computed_position": { "name": "Calculated position" },
       "fov_entry": { "name": "Sun enters window" },
-      "fov_exit": { "name": "Sun leaves window" }
+      "fov_exit": { "name": "Sun leaves window" },
+      "stability_pending_until": { "name": "Pending change commits" },
+      "manual_override_until": { "name": "Manual hold expires" }
     }
   }
 }

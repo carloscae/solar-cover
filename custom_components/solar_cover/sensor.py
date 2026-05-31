@@ -16,12 +16,11 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import CoordinatorData, SolarCoverCoordinator
+from .coordinator import CoordinatorData, SolarCoverCoordinator, zone_device_info
 
 _DEGREE = "°"
 _PERCENTAGE = "%"
@@ -29,9 +28,10 @@ _PERCENTAGE = "%"
 
 @dataclass(frozen=True, kw_only=True)
 class SolarCoverSensorDescription(SensorEntityDescription):
-    """Extends SensorEntityDescription with a value extractor function."""
+    """Extends SensorEntityDescription with value/attribute extractor functions."""
 
     value_fn: Callable[[CoordinatorData], Any]
+    attr_fn: Callable[[CoordinatorData], dict[str, Any]] | None = None
 
 
 SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
@@ -96,6 +96,31 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: datetime.fromisoformat(d.fov_exit) if d.fov_exit else None,
     ),
+    SolarCoverSensorDescription(
+        key="stability_pending_until",
+        translation_key="stability_pending_until",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:timer-sand",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (
+            datetime.fromisoformat(d.stability_pending_until)
+            if d.stability_pending_until
+            else None
+        ),
+        attr_fn=lambda d: {"pending_intent": d.pending_intent},
+    ),
+    SolarCoverSensorDescription(
+        key="manual_override_until",
+        translation_key="manual_override_until",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:timer-lock",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: (
+            datetime.fromisoformat(d.manual_override_until)
+            if d.manual_override_until
+            else None
+        ),
+    ),
 )
 
 
@@ -130,11 +155,7 @@ class SolarCoverSensorEntity(CoordinatorEntity[SolarCoverCoordinator], SensorEnt
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Solar Cover",
-        )
+        self._attr_device_info = zone_device_info(entry)
 
     @property
     def native_value(self) -> Any:
@@ -142,3 +163,10 @@ class SolarCoverSensorEntity(CoordinatorEntity[SolarCoverCoordinator], SensorEnt
         if self.coordinator.data is None:
             return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra attributes for sensors that define an attr_fn."""
+        if self.coordinator.data is None or self.entity_description.attr_fn is None:
+            return None
+        return self.entity_description.attr_fn(self.coordinator.data)

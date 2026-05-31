@@ -71,6 +71,25 @@ class Intent(StrEnum):
     MANUAL_OVERRIDE = "manual_override"
 
 
+class ReasonCode(StrEnum):
+    """Fine-grained sub-reason behind an Intent. Reported in reason_detail.
+
+    Each Intent maps to one or more of these. They name the exact gate
+    condition that fired so the user can see which setting to adjust.
+    """
+
+    WEATHER_RAIN = "weather_rain"
+    WEATHER_WIND = "weather_wind"
+    WEATHER_COLD = "weather_cold"
+    SUN_LOW = "sun_low"
+    FOV_LEFT = "fov_left"
+    FOV_RIGHT = "fov_right"
+    OVERCAST_RADIATION = "overcast_radiation"
+    OVERCAST_CLOUD = "overcast_cloud"
+    MANUAL_OVERRIDE = "manual_override"
+    SHADING = "shading"
+
+
 DEFAULT_INACTIVE_POSITION: int = 0
 DEFAULT_OVERRIDE_DURATION: int = 120
 DEFAULT_HYSTERESIS: float = 3.0
