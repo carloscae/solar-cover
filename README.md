@@ -2,7 +2,7 @@
 
 A [Home Assistant](https://www.home-assistant.io/) integration that automatically moves your blinds, shutters, and awnings based on where the sun actually is — and steps back when it isn't needed.
 
-![Solar Cover icon](custom_components/solar_cover/icon.png)
+<img src="icon.png" width="128" alt="Solar Cover">
 
 ---
 
