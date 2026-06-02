@@ -160,3 +160,100 @@ class TestResetTimers:
         now = datetime.now(tz=UTC)
         assert coord._evaluate_stability(Intent.INACTIVE_OVERCAST, now) is True
         assert coord._pending_since is None
+
+
+class TestExternalMoveDetection:
+    """_handle_cover_state_change auto-sets override on external cover moves."""
+
+    def _make_event(
+        self,
+        position: float,
+        is_opening: bool = False,
+        is_closing: bool = False,
+    ) -> MagicMock:
+        """Build a fake state_changed event."""
+        state = MagicMock()
+        state.attributes = {"current_position": position}
+        if is_opening:
+            state.attributes["is_opening"] = True
+        if is_closing:
+            state.attributes["is_closing"] = True
+        event = MagicMock()
+        event.data = {"new_state": state}
+        return event
+
+    def test_external_move_sets_override(self) -> None:
+        """Large position divergence after debounce window triggers override."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        # last_command_time is old (> 30 s ago)
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+
+        coord._handle_cover_state_change(self._make_event(80.0))
+
+        assert coord._manual_override_until is not None
+        assert coord._last_commanded == pytest.approx(80.0)
+        coord.hass.async_create_task.assert_called()
+
+    def test_recent_command_debounce_suppresses_trigger(self) -> None:
+        """State echo arriving within 30 s of a coordinator command is ignored."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=5)
+
+        coord._handle_cover_state_change(self._make_event(80.0))
+
+        assert coord._manual_override_until is None
+        coord.hass.async_create_task.assert_not_called()
+
+    def test_is_closing_suppresses_trigger(self) -> None:
+        """Cover travelling to coordinator-commanded position is not external."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+
+        coord._handle_cover_state_change(self._make_event(80.0, is_closing=True))
+
+        assert coord._manual_override_until is None
+
+    def test_delta_below_hysteresis_does_not_trigger(self) -> None:
+        """Small position noise does not count as a manual move."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+        # Default hysteresis is 3 %; move of 1 % is inside the dead-band.
+        coord._handle_cover_state_change(self._make_event(51.0))
+
+        assert coord._manual_override_until is None
+
+    def test_disabled_automation_skips_detection(self) -> None:
+        """No override is set when automation is turned off."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+        coord._enabled = False
+
+        coord._handle_cover_state_change(self._make_event(80.0))
+
+        assert coord._manual_override_until is None
+
+    def test_no_last_commanded_skips_detection(self) -> None:
+        """If the coordinator has never commanded a position, skip detection."""
+        coord = _make_coordinator()
+        coord._last_commanded = None
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+
+        coord._handle_cover_state_change(self._make_event(80.0))
+
+        assert coord._manual_override_until is None
+
+    def test_none_new_state_skips_detection(self) -> None:
+        """Event with no new_state (entity removed) is handled gracefully."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        event = MagicMock()
+        event.data = {"new_state": None}
+
+        coord._handle_cover_state_change(event)  # must not raise
+
+        assert coord._manual_override_until is None

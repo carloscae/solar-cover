@@ -216,6 +216,9 @@
           "manual_override": "Manual override"
         }
       },
+      "reason": {
+        "name": "Reason"
+      },
       "sun_elevation": { "name": "Sun elevation" },
       "sun_azimuth": { "name": "Sun azimuth" },
       "surface_azimuth": { "name": "Sun angle to window" },

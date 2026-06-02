@@ -89,6 +89,7 @@ class TestSensorDescriptions:
         keys = {d.key for d in SENSOR_DESCRIPTIONS}
         expected = {
             "intent",
+            "reason",
             "sun_elevation",
             "sun_azimuth",
             "surface_azimuth",

@@ -37,6 +37,8 @@ from .const import (
     CONF_MAX_POSITION,
     CONF_MIN_POSITION,
     CONF_MIN_TEMP,
+    CONF_OVERRIDE_DURATION,
+    CONF_OVERRIDE_DURATION_OVERRIDE,
     CONF_RADIATION_ENTITY,
     CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
@@ -50,6 +52,7 @@ from .const import (
     CONF_WINDOW_HEIGHT,
     DEFAULT_HYSTERESIS,
     DEFAULT_INACTIVE_POSITION,
+    DEFAULT_OVERRIDE_DURATION,
     DEFAULT_STABILITY_DELAY,
     DOMAIN,
     UPDATE_INTERVAL_MINUTES,
@@ -65,6 +68,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _COVER_DOMAIN = "cover"
 _SERVICE_SET_COVER_POSITION = "set_cover_position"
+_COMMAND_DEBOUNCE_SECONDS = 30
 
 
 def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -142,6 +146,8 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._enabled: bool = True
         self._manual_override_until: datetime | None = None
         self._unsub_sensors: Any = None
+        self._unsub_covers: Any = None
+        self._last_command_time: datetime | None = None
         self._store: Store[dict[str, Any]] = Store(hass, 1, f"solar_cover.{entry_id}")
 
         watch = [
@@ -166,6 +172,17 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def _stability_delay(self) -> int:
         """Configured stability delay in minutes (0 = feature disabled)."""
         return int(self._integration.get(CONF_STABILITY_DELAY, DEFAULT_STABILITY_DELAY))
+
+    def _get_override_duration(self) -> int:
+        """Return the manual override duration in minutes from config."""
+        return int(
+            self._zone.get(
+                CONF_OVERRIDE_DURATION_OVERRIDE,
+                self._integration.get(
+                    CONF_OVERRIDE_DURATION, DEFAULT_OVERRIDE_DURATION
+                ),
+            )
+        )
 
     @property
     def enabled(self) -> bool:
@@ -473,6 +490,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             {ATTR_ENTITY_ID: entities, "position": round(position)},
             blocking=False,
         )
+        self._last_command_time = datetime.now(tz=UTC)
 
     async def async_apply_manual_position(
         self, position: float, until: datetime
@@ -493,6 +511,93 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def clear_manual_override(self) -> None:
         self._manual_override_until = None
         self._clear_pending()
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def async_setup_cover_listeners(self) -> None:
+        """Subscribe to state-changed events on the zone's physical cover entities.
+
+        Called once after the first coordinator refresh so _last_commanded is
+        already populated and the listener has a valid baseline to compare against.
+        """
+        entities = self._zone.get(CONF_COVER_ENTITIES, [])
+        if not entities:
+            return
+        self._unsub_covers = async_track_state_change_event(
+            self.hass, entities, self._handle_cover_state_change
+        )
+
+    def cancel_cover_listeners(self) -> None:
+        """Unsubscribe the physical cover state listeners."""
+        if self._unsub_covers is not None:
+            self._unsub_covers()
+            self._unsub_covers = None
+
+    def cancel_sensor_listeners(self) -> None:
+        """Unsubscribe the weather/cloud/radiation state listeners."""
+        if self._unsub_sensors is not None:
+            self._unsub_sensors()
+            self._unsub_sensors = None
+
+    @callback
+    def _handle_cover_state_change(self, event: Any) -> None:
+        """Detect external cover moves and set a manual override automatically.
+
+        Filters out:
+        - Covers that are still travelling (is_opening / is_closing attributes)
+        - State echoes from coordinator's own commands (30-second debounce window)
+        - Position changes smaller than hysteresis (noise / rounding)
+        - Events while automation is disabled
+        """
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+
+        # Skip unavailable / unknown states -- current_position attribute is unreliable.
+        if new_state.state in ("unavailable", "unknown"):
+            return
+
+        if not self._enabled:
+            return
+
+        # Skip while the cover is still travelling to a commanded position.
+        attrs = new_state.attributes
+        if attrs.get("is_opening") or attrs.get("is_closing"):
+            return
+
+        # Debounce: ignore state echoes that arrive shortly after a coordinator command.
+        now = datetime.now(tz=UTC)
+        elapsed = (
+            (now - self._last_command_time).total_seconds()
+            if self._last_command_time is not None
+            else None
+        )
+        if elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS:
+            return
+
+        try:
+            new_pos = float(attrs.get("current_position", 0))
+        except (TypeError, ValueError):
+            return
+
+        last = self._last_commanded
+        if last is None:
+            return
+
+        hysteresis = float(
+            self._zone.get(
+                CONF_HYSTERESIS,
+                self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
+            )
+        )
+        if abs(new_pos - last) < hysteresis:
+            return
+
+        # External move confirmed -- set a manual override.
+        until = now + timedelta(minutes=self._get_override_duration())
+        self._manual_override_until = until
+        self._clear_pending()
+        self._last_commanded = new_pos
+        self.hass.async_create_task(self._store.async_save({"last_commanded": new_pos}))
         self.hass.async_create_task(self.async_request_refresh())
 
     def reset_timers(self) -> None:

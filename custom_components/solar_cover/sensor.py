@@ -43,6 +43,14 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         value_fn=lambda d: d.intent.value,
     ),
     SolarCoverSensorDescription(
+        key="reason",
+        translation_key="reason",
+        icon="mdi:text",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: d.reason,
+        attr_fn=lambda d: {"reason_detail": d.reason_detail},
+    ),
+    SolarCoverSensorDescription(
         key="sun_elevation",
         translation_key="sun_elevation",
         native_unit_of_measurement=_DEGREE,
