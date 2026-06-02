@@ -256,10 +256,12 @@ class TestStabilityEndToEnd:
             IntentResult(Intent.INACTIVE_OVERCAST, None, "Idle (overcast)", []),
         ]
         times = [
-            _T0,
-            _T0 + timedelta(minutes=1),
-            _T0 + timedelta(minutes=5),
-            _T0 + timedelta(minutes=11),
+            _T0,                              # run 1: _async_update_data now -> SHADING
+            _T0 + timedelta(minutes=1),       # run 1: _command_covers now
+            _T0 + timedelta(minutes=5),       # run 2: _async_update_data now -> worsening held
+            _T0 + timedelta(minutes=11),      # run 3: _async_update_data now -> still held (6 min < 10)
+            _T0 + timedelta(minutes=16),      # run 4: _async_update_data now -> elapsed (11 min >= 10)
+            _T0 + timedelta(minutes=16),      # run 4: _command_covers now
         ]
 
         with (
