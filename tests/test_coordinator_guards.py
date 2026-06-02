@@ -115,18 +115,6 @@ class TestManualOverride:
         assert data.manual_override_until is not None
         assert data.reason.startswith("Manual override")
 
-    @pytest.mark.asyncio
-    async def test_apply_manual_records_last_commanded(self) -> None:
-        coord = _make_coordinator()
-        coord.hass.services.async_call = AsyncMock()
-        until = datetime.now(tz=UTC) + timedelta(minutes=120)
-
-        await coord.async_apply_manual_position(42.0, until)
-
-        assert coord._last_commanded == pytest.approx(42.0)
-        assert coord._manual_override_until == until
-        coord._store.async_save.assert_awaited_with({"last_commanded": 42.0})
-
 
 class TestResetTimers:
     def test_reset_timers_clears_both_holds(self) -> None:

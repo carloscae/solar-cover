@@ -1,10 +1,14 @@
-# Agent orchestration state — local only
+# Agent orchestration and developer tooling — local only
 .agent/
 bootstrap-governance.sh
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.cursorrules
+.github/copilot-instructions.md
 
 # Internal project management — local only
-docs/sprints/
-docs/handoffs/
+docs/
 
 # Python
 __pycache__/

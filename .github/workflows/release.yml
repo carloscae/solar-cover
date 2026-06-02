@@ -45,6 +45,43 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build release notes
+        if: steps.check.outputs.exists == 'false'
+        id: notes
+        run: |
+          version="v${{ steps.version.outputs.version }}"
+          prev=$(git tag --sort=-version:refname | grep -E '^v[0-9]' | head -1)
+
+          if [ -n "$prev" ]; then
+            range="${prev}..HEAD"
+          else
+            range="HEAD"
+          fi
+
+          features=$(git log $range --pretty=format:"%s" | grep -E "^feat(\(.+\))?[!]?:" | sed 's/^feat[^:]*: /- /')
+          fixes=$(git log $range --pretty=format:"%s" | grep -E "^fix(\(.+\))?[!]?:" | sed 's/^fix[^:]*: /- /')
+          breaking=$(git log $range --pretty=format:"%s" | grep -E "^[a-z]+(\(.+\))?!:" | sed 's/^[^:]*!: /- /')
+
+          notes=""
+
+          if [ -n "$breaking" ]; then
+            notes="${notes}## Breaking changes\n${breaking}\n\n"
+          fi
+          if [ -n "$features" ]; then
+            notes="${notes}## What's new\n${features}\n\n"
+          fi
+          if [ -n "$fixes" ]; then
+            notes="${notes}## Bug fixes\n${fixes}\n\n"
+          fi
+
+          if [ -z "$notes" ]; then
+            notes="Maintenance release — see commit history for details."
+          fi
+
+          notes="${notes}**Full changelog:** https://github.com/${{ github.repository }}/compare/${prev}...${version}"
+
+          printf "%b" "$notes" > release_notes.md
+
       - name: Create release
         if: steps.check.outputs.exists == 'false'
         env:
@@ -52,5 +89,5 @@ jobs:
         run: |
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
-            --generate-notes \
+            --notes-file release_notes.md \
             --target "${{ github.sha }}"
