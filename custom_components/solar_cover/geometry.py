@@ -66,8 +66,13 @@ def horizontal_position(
 
     cos_gamma = math.cos(gamma)
     if cos_gamma <= 0:
-        # Oblique sun (gamma > 90 deg) -- blind_height clips to 0, full extension needed
-        return 100.0
+        # Sun more than 90 deg off-axis: the glare-depth formula degenerates here
+        # (blind_height clips to h_win, so length -> 0). Return 0.0 to stay
+        # continuous with the formula's own limit as gamma -> 90, instead of
+        # snapping to 100. This holds the cover at the position it had just
+        # inside 90 deg, so it keeps shading for the rest of the configured FoV
+        # (out to fov_right) rather than jumping the moment gamma crosses 90.
+        return 0.0
 
     blind_height = min(max((distance / cos_gamma) * math.tan(sol_elev), 0.0), h_win)
     a_angle = math.pi / 2.0 - sol_elev

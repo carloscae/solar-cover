@@ -80,7 +80,12 @@ class TestHorizontalPosition:
         )
         assert 0.0 <= result <= 100.0
 
-    def test_gamma_near_90_returns_100(self) -> None:
+    def test_gamma_past_90_continuous_returns_0(self) -> None:
+        # Past 90 deg off-axis the formula already trends to 0 (blind_height
+        # clips to h_win as gamma -> 90), so the cos_gamma <= 0 branch must
+        # return 0.0 to stay continuous, not jump to 100. The old 100.0 made
+        # the cover snap the instant the sun crossed 90 deg, before it left
+        # the configured FoV.
         result = horizontal_position(
             sol_elev_deg=30.0,
             gamma_deg=91.0,
@@ -89,7 +94,7 @@ class TestHorizontalPosition:
             awn_angle_deg=15.0,
             distance=2.0,
         )
-        assert result == 100.0
+        assert result == 0.0
 
     def test_result_clamped_0_to_100(self) -> None:
         # Verify clip is active (the adaptive-cover bug was missing this)
