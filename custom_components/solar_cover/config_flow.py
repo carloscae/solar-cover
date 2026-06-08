@@ -65,10 +65,20 @@ def _auto_elevation_threshold(hass_config: Any) -> float:
     return round((90.0 - abs(lat)) * DEFAULT_ELEVATION_THRESHOLD_FACTOR, 1)
 
 
+def _validate_min_max(user_input: dict[str, Any], errors: dict[str, str]) -> None:
+    """Flag an inverted shading position range (min above max)."""
+    min_pos = user_input.get(CONF_MIN_POSITION)
+    max_pos = user_input.get(CONF_MAX_POSITION)
+    if min_pos is not None and max_pos is not None and float(min_pos) > float(max_pos):
+        errors[CONF_MIN_POSITION] = "min_exceeds_max"
+
+
 class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
     """Multi-step config flow: integration (global) then zone (per cover group)."""
 
-    VERSION = 1
+    # v2: wind_threshold canonical unit changed from m/s to km/h
+    # (see async_migrate_entry in __init__.py).
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialise flow state."""
@@ -116,10 +126,10 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_WIND_THRESHOLD): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=50,
-                        step=0.5,
+                        max=150,
+                        step=1,
                         mode=NumberSelectorMode.BOX,
-                        unit_of_measurement="m/s",
+                        unit_of_measurement="km/h",
                     )
                 ),
                 vol.Optional(CONF_MIN_TEMP): selector.NumberSelector(
@@ -238,6 +248,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 slat_spacing = float(user_input.get(CONF_SLAT_SPACING, 50.0))
                 if slat_spacing > slat_width:
                     errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
+            _validate_min_max(user_input, errors)
             if not errors:
                 title = f"Zone: {self._zone_partial.get(CONF_NAME, 'Cover Zone')}"
                 return self.async_create_entry(
@@ -428,10 +439,10 @@ class IntegrationOptionsFlow(OptionsFlow):
                     vol.Optional(CONF_WIND_THRESHOLD): selector.NumberSelector(
                         selector.NumberSelectorConfig(
                             min=0,
-                            max=50,
-                            step=0.5,
+                            max=150,
+                            step=1,
                             mode=NumberSelectorMode.BOX,
-                            unit_of_measurement="m/s",
+                            unit_of_measurement="km/h",
                         )
                     ),
                     vol.Optional(CONF_MIN_TEMP): selector.NumberSelector(
@@ -553,14 +564,17 @@ class ZoneOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Step 1: common fields + cover type selection. Routes to geometry step."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._partial = dict(user_input)
-            cover_type = CoverType(user_input[CONF_COVER_TYPE])
-            if cover_type == CoverType.HORIZONTAL:
-                return await self.async_step_geometry_horizontal()
-            if cover_type == CoverType.TILT:
-                return await self.async_step_geometry_tilt()
-            return await self.async_step_geometry_vertical()
+            _validate_min_max(user_input, errors)
+            if not errors:
+                self._partial = dict(user_input)
+                cover_type = CoverType(user_input[CONF_COVER_TYPE])
+                if cover_type == CoverType.HORIZONTAL:
+                    return await self.async_step_geometry_horizontal()
+                if cover_type == CoverType.TILT:
+                    return await self.async_step_geometry_tilt()
+                return await self.async_step_geometry_vertical()
 
         data = {**self._entry.data, **self._entry.options}
         auto_threshold = _auto_elevation_threshold(self.hass.config)
@@ -649,7 +663,7 @@ class ZoneOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
 
     async def async_step_geometry_vertical(
         self, user_input: dict[str, Any] | None = None

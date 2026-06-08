@@ -19,6 +19,8 @@ from custom_components.solar_cover.const import (
     CONF_FOV_LEFT,
     CONF_FOV_RIGHT,
     CONF_GLARE_DEPTH,
+    CONF_MAX_POSITION,
+    CONF_MIN_POSITION,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
     CONF_STABILITY_DELAY,
@@ -85,6 +87,38 @@ def integration_entry(hass: HomeAssistant) -> MockConfigEntry:
     )
     entry.add_to_hass(hass)
     return entry
+
+
+def _zone_entry(hass: HomeAssistant, cover_type: CoverType) -> MockConfigEntry:
+    """A zone config entry (not set up) for driving its options flow."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "entry_type": ENTRY_TYPE_ZONE,
+            "name": "South",
+            CONF_COVER_TYPE: cover_type,
+            CONF_AZIMUTH: 180,
+            CONF_FOV_LEFT: 90,
+            CONF_FOV_RIGHT: 90,
+            CONF_ELEVATION_THRESHOLD: 27.0,
+            CONF_COVER_ENTITIES: [],
+        },
+        title="Zone: South",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+# Common fields the zone options-flow "init" step requires.
+_ZONE_OPTIONS_INIT = {
+    CONF_COVER_ENTITIES: [],
+    CONF_AZIMUTH: 200,
+    CONF_FOV_LEFT: 80,
+    CONF_FOV_RIGHT: 70,
+    CONF_ELEVATION_THRESHOLD: 20.0,
+    CONF_MIN_POSITION: 0,
+    CONF_MAX_POSITION: 100,
+}
 
 
 class TestIntegrationStep:
@@ -289,6 +323,28 @@ class TestZoneConfigureStep:
         assert result3["type"] == FlowResultType.FORM
         assert CONF_SLAT_SPACING in result3.get("errors", {})
 
+    async def test_min_exceeds_max_validation(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+        )
+        bad_range = {
+            **ZONE_STEP2_VERTICAL,
+            CONF_MIN_POSITION: 80,
+            CONF_MAX_POSITION: 50,  # min > max -- should fail
+        }
+        result3 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input=bad_range
+        )
+        assert result3["type"] == FlowResultType.FORM
+        assert CONF_MIN_POSITION in result3.get("errors", {})
+
 
 class TestIntegrationOptionsFlow:
     async def test_stability_fields_round_trip(
@@ -327,3 +383,117 @@ class TestIntegrationOptionsFlow:
         )
         assert result2["type"] == FlowResultType.CREATE_ENTRY
         assert result2["data"][CONF_STABILITY_DELAY] == 0
+
+
+class TestZoneOptionsFlow:
+    async def test_vertical_round_trip(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.VERTICAL)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "init"
+
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={**_ZONE_OPTIONS_INIT, CONF_COVER_TYPE: CoverType.VERTICAL},
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "geometry_vertical"
+
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={CONF_WINDOW_HEIGHT: 3.0, CONF_GLARE_DEPTH: 1.5},
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        # Options carry both the init fields and the geometry fields.
+        assert result3["data"][CONF_AZIMUTH] == 200
+        assert result3["data"][CONF_WINDOW_HEIGHT] == 3.0
+        assert result3["data"][CONF_GLARE_DEPTH] == 1.5
+
+    async def test_horizontal_round_trip(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.HORIZONTAL)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={**_ZONE_OPTIONS_INIT, CONF_COVER_TYPE: CoverType.HORIZONTAL},
+        )
+        assert result2["step_id"] == "geometry_horizontal"
+
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={
+                CONF_GLARE_DEPTH: 2.0,
+                CONF_ATTACH_HEIGHT: 2.8,
+                CONF_AWN_LENGTH: 4.0,
+                CONF_AWN_ANGLE: 20,
+            },
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_AWN_LENGTH] == 4.0
+
+    async def test_tilt_round_trip(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.TILT)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={**_ZONE_OPTIONS_INIT, CONF_COVER_TYPE: CoverType.TILT},
+        )
+        assert result2["step_id"] == "geometry_tilt"
+
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={
+                CONF_SLAT_WIDTH: 90,
+                CONF_SLAT_SPACING: 60,
+                CONF_TILT_RANGE: TiltRange.BIDIRECTIONAL,
+            },
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_SLAT_WIDTH] == 90
+        assert result3["data"][CONF_TILT_RANGE] == TiltRange.BIDIRECTIONAL
+
+    async def test_init_min_exceeds_max_errors(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.VERTICAL)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                **_ZONE_OPTIONS_INIT,
+                CONF_COVER_TYPE: CoverType.VERTICAL,
+                CONF_MIN_POSITION: 90,
+                CONF_MAX_POSITION: 40,
+            },
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "init"
+        assert CONF_MIN_POSITION in result2.get("errors", {})
+
+    async def test_tilt_spacing_validation_errors(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.TILT)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={**_ZONE_OPTIONS_INIT, CONF_COVER_TYPE: CoverType.TILT},
+        )
+        assert result2["step_id"] == "geometry_tilt"
+
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={
+                CONF_SLAT_WIDTH: 50,
+                CONF_SLAT_SPACING: 70,  # spacing > width -- invalid
+                CONF_TILT_RANGE: TiltRange.SINGLE,
+            },
+        )
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "geometry_tilt"
+        assert CONF_SLAT_SPACING in result3.get("errors", {})

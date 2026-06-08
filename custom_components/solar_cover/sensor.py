@@ -19,8 +19,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import CoordinatorData, SolarCoverCoordinator, zone_device_info
+from .coordinator import (
+    CoordinatorData,
+    SolarCoverConfigEntry,
+    SolarCoverCoordinator,
+    zone_device_info,
+)
+
+# Read-only diagnostic sensors backed by the coordinator; no device I/O to serialise.
+PARALLEL_UPDATES = 0
 
 _DEGREE = "°"
 _PERCENTAGE = "%"
@@ -134,13 +141,11 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SolarCoverConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Solar Cover diagnostic sensor entities from a config entry."""
-    coordinator: SolarCoverCoordinator = hass.data[DOMAIN]["coordinators"][
-        entry.entry_id
-    ]
+    coordinator = entry.runtime_data
     async_add_entities(
         SolarCoverSensorEntity(coordinator, entry, description)
         for description in SENSOR_DESCRIPTIONS

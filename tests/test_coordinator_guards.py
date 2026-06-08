@@ -35,7 +35,7 @@ def _make_coordinator(hass: MagicMock | None = None) -> SolarCoverCoordinator:
             zone_data=zone,
             integration_data={},
             solar_engine=MagicMock(),
-            entry_id="test_entry",
+            config_entry=MagicMock(entry_id="test_entry"),
         )
         coord._store = MockStore.return_value
     return coord

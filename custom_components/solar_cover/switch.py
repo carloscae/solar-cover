@@ -10,20 +10,23 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN
-from .coordinator import SolarCoverCoordinator, zone_device_info
+from .coordinator import (
+    SolarCoverConfigEntry,
+    SolarCoverCoordinator,
+    zone_device_info,
+)
+
+# Toggles a coordinator flag in memory; no device I/O to serialise.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SolarCoverConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the automation enable/disable switch for a zone."""
-    coordinator: SolarCoverCoordinator = hass.data[DOMAIN]["coordinators"][
-        entry.entry_id
-    ]
-    async_add_entities([SolarCoverSwitch(coordinator, entry)])
+    async_add_entities([SolarCoverSwitch(entry.runtime_data, entry)])
 
 
 class SolarCoverSwitch(SwitchEntity, RestoreEntity):

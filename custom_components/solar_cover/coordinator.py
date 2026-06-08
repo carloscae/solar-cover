@@ -11,12 +11,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, UnitOfSpeed, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util.unit_conversion import SpeedConverter, TemperatureConverter
 
 from .const import (
     CONF_ATTACH_HEIGHT,
@@ -68,7 +70,51 @@ _LOGGER = logging.getLogger(__name__)
 
 _COVER_DOMAIN = "cover"
 _SERVICE_SET_COVER_POSITION = "set_cover_position"
+_SERVICE_SET_COVER_TILT_POSITION = "set_cover_tilt_position"
 _COMMAND_DEBOUNCE_SECONDS = 30
+
+
+def _wind_to_kmh(value: Any, unit: str | None) -> float | None:
+    """Convert a weather entity's wind speed to km/h (the canonical unit).
+
+    The wind threshold the user configures is in km/h, but weather entities
+    report ``wind_speed`` in their own ``wind_speed_unit`` (often m/s or mph).
+    Comparing the two without converting silently retracts covers at the wrong
+    speed. Falls back to the raw value if the unit is missing or unknown.
+    """
+    if value is None:
+        return None
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not unit or unit == UnitOfSpeed.KILOMETERS_PER_HOUR:
+        return speed
+    try:
+        return SpeedConverter.convert(speed, unit, UnitOfSpeed.KILOMETERS_PER_HOUR)
+    except (HomeAssistantError, ValueError):
+        return speed
+
+
+def _temp_to_celsius(value: Any, unit: str | None) -> float | None:
+    """Convert a weather entity's temperature to °C (the canonical unit).
+
+    The minimum-temperature threshold is in °C; weather entities report
+    ``temperature`` in their own ``temperature_unit``. Falls back to the raw
+    value if the unit is missing or unknown.
+    """
+    if value is None:
+        return None
+    try:
+        temp = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not unit or unit == UnitOfTemperature.CELSIUS:
+        return temp
+    try:
+        return TemperatureConverter.convert(temp, unit, UnitOfTemperature.CELSIUS)
+    except (HomeAssistantError, ValueError):
+        return temp
 
 
 def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -125,14 +171,16 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         zone_data: dict[str, Any],
         integration_data: dict[str, Any],
         solar_engine: SolarEngine,
-        entry_id: str = "",
+        config_entry: ConfigEntry,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{zone_data.get('name', 'zone')}",
+            config_entry=config_entry,
             update_interval=timedelta(minutes=UPDATE_INTERVAL_MINUTES),
         )
+        entry_id = config_entry.entry_id
         self._zone = zone_data
         self._integration = integration_data
         self._solar = solar_engine
@@ -145,6 +193,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._pending_since: datetime | None = None
         self._enabled: bool = True
         self._manual_override_until: datetime | None = None
+        # The user's manual target, remembered so it can be restored if a
+        # transient weather retraction overwrites _last_commanded mid-override.
+        self._manual_position: float | None = None
         self._unsub_sensors: Any = None
         self._unsub_covers: Any = None
         self._last_command_time: datetime | None = None
@@ -222,8 +273,12 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         if weather_state:
             attrs = weather_state.attributes
-            wind_speed = attrs.get("wind_speed")
-            outdoor_temp = attrs.get("temperature")
+            wind_speed = _wind_to_kmh(
+                attrs.get("wind_speed"), attrs.get("wind_speed_unit")
+            )
+            outdoor_temp = _temp_to_celsius(
+                attrs.get("temperature"), attrs.get("temperature_unit")
+            )
             if weather_state.state not in ("unavailable", "unknown"):
                 raining = weather_state.state in (
                     "rainy",
@@ -318,25 +373,39 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._last_reason = result.reason
             self._last_triggers = [t.to_dict() for t in result.triggers]
             last = self._last_commanded
-            delta: float | None = abs(clamped - last) if last is not None else None
 
-            # Only command covers when: automation enabled, sun is above the
-            # horizon, and either intent changed or the position shift exceeds
-            # hysteresis. Suppressing commands below the horizon prevents an HA
-            # restart at night from re-opening covers the user closed manually.
-            # While a manual override is in effect the user owns the position --
-            # hold whatever they last set and never drive to the inactive rest
-            # position, otherwise the override would be silently undone.
+            # Resolve the target position for this intent. During a manual
+            # override the user owns the position: the target is their remembered
+            # manual setting, re-asserted only if it has drifted (e.g. a transient
+            # weather retraction earlier in the override window moved the cover
+            # off the manual position). We never drive to the inactive rest
+            # position while an override holds.
+            if intent == Intent.MANUAL_OVERRIDE:
+                target = self._manual_position
+                needs_command = (
+                    target is not None
+                    and last is not None
+                    and abs(target - last) >= hysteresis
+                )
+            else:
+                target = clamped
+                delta = abs(clamped - last) if last is not None else None
+                needs_command = delta is None or delta >= hysteresis or intent_changed
+
+            # Suppressing commands below the horizon prevents an HA restart at
+            # night from re-opening covers the user closed manually. A manual
+            # override is exempt: restoring the user's explicit position (e.g.
+            # after a transient weather retraction cleared) must work regardless
+            # of the sun, and it only fires when the position has actually drifted.
             above_horizon = sol_el > 0
-            if (
-                self._enabled
-                and above_horizon
-                and intent != Intent.MANUAL_OVERRIDE
-                and (delta is None or delta >= hysteresis or intent_changed)
-            ):
-                await self._command_covers(clamped)
-                self._last_commanded = clamped
-                await self._store.async_save({"last_commanded": clamped})
+            allow_command = above_horizon or intent == Intent.MANUAL_OVERRIDE
+            if self._enabled and allow_command and target is not None and needs_command:
+                # Only record the new position when the command actually
+                # succeeded. Recording a failed move as committed would let
+                # hysteresis suppress every retry, stranding the cover.
+                if await self._command_covers(target):
+                    self._last_commanded = target
+                    await self._store.async_save({"last_commanded": target})
 
         # Expose the last committed intent/position/reason -- a pending candidate
         # that has not held long enough is internal state only. The reason must
@@ -480,20 +549,49 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         except ValueError:
             return None
 
-    async def _command_covers(self, position: float) -> None:
+    def _is_tilt(self) -> bool:
+        """Whether this zone drives venetian slat tilt rather than position."""
+        return CoverType(self._zone[CONF_COVER_TYPE]) == CoverType.TILT
+
+    async def _command_covers(self, position: float) -> bool:
+        """Command the zone's covers. Return True on success (or no-op), False if
+        the service call failed -- the caller uses this to decide whether to record
+        the new position as committed."""
         entities = self._zone.get(CONF_COVER_ENTITIES, [])
         if not entities:
-            return
-        await self.hass.services.async_call(
-            _COVER_DOMAIN,
-            _SERVICE_SET_COVER_POSITION,
-            {ATTR_ENTITY_ID: entities, "position": round(position)},
-            blocking=False,
-        )
+            # Observe-only zone: nothing to move, but the computed position is
+            # still the intended one, so treat it as a successful no-op.
+            return True
+        # Venetian blinds expose the slat angle on a separate axis: the geometry
+        # output is a tilt percentage, so it must be sent via set_cover_tilt_position.
+        # Sending it as a position would raise/lower the blind instead of angling it.
+        if self._is_tilt():
+            service = _SERVICE_SET_COVER_TILT_POSITION
+            data = {ATTR_ENTITY_ID: entities, "tilt_position": round(position)}
+        else:
+            service = _SERVICE_SET_COVER_POSITION
+            data = {ATTR_ENTITY_ID: entities, "position": round(position)}
+        # Stamp the command time before the call so the 30-second echo debounce
+        # in _handle_cover_state_change covers the resulting state change even if
+        # the service call is slow or raises.
         self._last_command_time = datetime.now(tz=UTC)
+        try:
+            await self.hass.services.async_call(
+                _COVER_DOMAIN, service, data, blocking=True
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Failed to command covers %s to %d%%: %s",
+                entities,
+                round(position),
+                err,
+            )
+            return False
+        return True
 
     def clear_manual_override(self) -> None:
         self._manual_override_until = None
+        self._manual_position = None
         self._clear_pending()
         self.hass.async_create_task(self.async_request_refresh())
 
@@ -536,7 +634,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if new_state is None:
             return
 
-        # Skip unavailable / unknown states -- current_position attribute is unreliable.
+        # Skip unavailable / unknown states -- the position attribute is unreliable.
         if new_state.state in ("unavailable", "unknown"):
             return
 
@@ -548,6 +646,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if attrs.get("is_opening") or attrs.get("is_closing"):
             return
 
+        # Read the axis this zone actually drives: slat tilt for venetian
+        # blinds, otherwise the cover position.
+        pos_attr = "current_tilt_position" if self._is_tilt() else "current_position"
+
         # Debounce: ignore state echoes that arrive shortly after a coordinator command.
         now = datetime.now(tz=UTC)
         elapsed = (
@@ -558,8 +660,11 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS:
             return
 
+        raw_pos = attrs.get(pos_attr)
+        if raw_pos is None:
+            return
         try:
-            new_pos = float(attrs.get("current_position", 0))
+            new_pos = float(raw_pos)
         except (TypeError, ValueError):
             return
 
@@ -576,9 +681,12 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if abs(new_pos - last) < hysteresis:
             return
 
-        # External move confirmed -- set a manual override.
+        # External move confirmed -- set a manual override and remember the
+        # position the user chose, so it can be restored if a transient weather
+        # retraction moves the cover off it before the override expires.
         until = now + timedelta(minutes=self._get_override_duration())
         self._manual_override_until = until
+        self._manual_position = new_pos
         self._clear_pending()
         self._last_commanded = new_pos
         self.hass.async_create_task(self._store.async_save({"last_commanded": new_pos}))
@@ -599,4 +707,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._clear_pending()
         self._last_intent = None
         self._manual_override_until = None
+        self._manual_position = None
         self.hass.async_create_task(self.async_request_refresh())
+
+
+# A zone config entry carries its coordinator on runtime_data. Integration
+# (global-settings) entries do not set runtime_data.
+type SolarCoverConfigEntry = ConfigEntry[SolarCoverCoordinator]

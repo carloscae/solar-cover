@@ -20,7 +20,7 @@
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
-          "wind_threshold": "Covers will retract automatically when wind speed exceeds this value (m/s). Leave empty to ignore wind.",
+          "wind_threshold": "Covers will retract automatically when wind speed exceeds this value (km/h). Leave empty to ignore wind.",
           "min_temp": "Covers stay open below this temperature so the room can warm up (°C).",
           "inactive_position": "How far open or closed the covers sit when the sun is not hitting the window (0 = fully open, 100 = fully closed).",
           "override_duration": "After you move a cover manually, automation stays paused for this many minutes.",
@@ -86,6 +86,7 @@
     },
     "error": {
       "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
+      "min_exceeds_max": "Minimum shading position must not exceed the maximum.",
       "unknown": "Unexpected error. Check the logs."
     }
   },
@@ -121,7 +122,7 @@
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
-          "wind_threshold": "Covers retract automatically when wind exceeds this speed (m/s).",
+          "wind_threshold": "Covers retract automatically when wind exceeds this speed (km/h).",
           "min_temp": "Covers stay retracted below this temperature to let in warmth (°C).",
           "inactive_position": "Position (0-100%) when the sun is not hitting the window.",
           "override_duration": "After you move a cover manually, automation stays paused for this many minutes.",
@@ -190,6 +191,7 @@
     },
     "error": {
       "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
+      "min_exceeds_max": "Minimum shading position must not exceed the maximum.",
       "unknown": "Unexpected error. Check the logs."
     }
   },
@@ -216,6 +218,7 @@
           "manual_override": "Manual override"
         }
       },
+      "reason": { "name": "Reason" },
       "sun_elevation": { "name": "Sun elevation" },
       "sun_azimuth": { "name": "Sun azimuth" },
       "surface_azimuth": { "name": "Sun angle to window" },

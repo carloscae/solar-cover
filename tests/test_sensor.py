@@ -307,8 +307,7 @@ async def test_sensor_platform_creates_all_entities(hass: HomeAssistant) -> None
     )
     zone_entry.add_to_hass(hass)
 
-    hass.data.setdefault(DOMAIN, {"coordinators": {}})
-    hass.data[DOMAIN]["coordinators"]["test_zone_entry"] = fake_coordinator
+    zone_entry.runtime_data = fake_coordinator
 
     with patch(
         "custom_components.solar_cover.sensor.CoordinatorEntity.__init_subclass__",

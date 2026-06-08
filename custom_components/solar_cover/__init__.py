@@ -2,37 +2,75 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_WIND_THRESHOLD,
     DOMAIN,
     ENTRY_TYPE_INTEGRATION,
     ENTRY_TYPE_ZONE,
 )
-from .coordinator import SolarCoverCoordinator
+from .coordinator import SolarCoverConfigEntry, SolarCoverCoordinator
 from .solar import SolarEngine
 
 PLATFORMS_ZONE = ["button", "sensor", "switch"]
 
+# m/s -> km/h. v1 stored wind_threshold under an m/s UI label; v2 makes km/h the
+# canonical unit (and converts the measured wind), so legacy values are scaled.
+_MS_TO_KMH = 3.6
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an old config entry to the current schema version."""
+    if entry.version > 2:
+        # Downgrade from a newer schema is not supported.
+        return False
+
+    if entry.version < 2:
+        # v1 -> v2: reinterpret the stored wind threshold from m/s to km/h so an
+        # existing user's intent (the value they typed under the old m/s label)
+        # is preserved rather than silently treated as a much lower km/h limit.
+        new_data = dict(entry.data)
+        new_options = dict(entry.options)
+        for store in (new_data, new_options):
+            value = store.get(CONF_WIND_THRESHOLD)
+            if value is not None:
+                store[CONF_WIND_THRESHOLD] = round(float(value) * _MS_TO_KMH, 1)
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options, version=2
+        )
+
+    return True
+
+
+def _integration_data(hass: HomeAssistant) -> dict[str, Any]:
+    """Return the merged global settings from the integration config entry.
+
+    Read live from the integration entry rather than cached in ``hass.data`` so
+    a zone reload always picks up the current global settings (the cascade in
+    ``_async_update_integration_listener`` reloads zones on a global change).
+    """
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get("entry_type") == ENTRY_TYPE_INTEGRATION:
+            return {**entry.data, **entry.options}
+    return {}
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    hass.data.setdefault(DOMAIN, {"coordinators": {}})
-
     entry_type = entry.data.get("entry_type", ENTRY_TYPE_ZONE)
 
     if entry_type == ENTRY_TYPE_INTEGRATION:
         if entry.title != "Global Settings":
             hass.config_entries.async_update_entry(entry, title="Global Settings")
-        integration_data = {**entry.data, **entry.options}
-        hass.data[DOMAIN]["integration"] = integration_data
         entry.async_on_unload(
             entry.add_update_listener(_async_update_integration_listener)
         )
         return True
 
     # Zone entry
-    integration_data = hass.data[DOMAIN].get("integration", {})
     zone_data = {**entry.data, **entry.options}
     zone_name = zone_data.get("name", "Cover Zone")
     expected_title = f"Zone: {zone_name}"
@@ -47,9 +85,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SolarCoverCoordinator(
         hass=hass,
         zone_data=zone_data,
-        integration_data=integration_data,
+        integration_data=_integration_data(hass),
         solar_engine=solar,
-        entry_id=entry.entry_id,
+        config_entry=entry,
     )
     await coordinator.async_restore_state()
     await coordinator.async_config_entry_first_refresh()
@@ -57,7 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(coordinator.cancel_cover_listeners)
     entry.async_on_unload(coordinator.cancel_sensor_listeners)
 
-    hass.data[DOMAIN]["coordinators"][entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ZONE)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
@@ -67,16 +105,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_type = entry.data.get("entry_type", ENTRY_TYPE_ZONE)
 
     if entry_type == ENTRY_TYPE_INTEGRATION:
-        hass.data[DOMAIN].pop("integration", None)
         return True
 
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS_ZONE)
-    if unloaded:
-        hass.data[DOMAIN]["coordinators"].pop(entry.entry_id, None)
-    return unloaded
+    # Zone entry: unload platforms. runtime_data is dropped automatically and
+    # listeners registered with async_on_unload are cancelled by the framework.
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS_ZONE)
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(
+    hass: HomeAssistant, entry: SolarCoverConfigEntry
+) -> None:
     """Reload the config entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
 

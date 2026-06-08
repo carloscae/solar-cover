@@ -26,6 +26,11 @@ def vertical_position(
     Returns:
         Position percentage (0 = fully retracted, 100 = fully deployed).
     """
+    # Defensive: a non-positive window height is invalid (the config flow floors
+    # it at 0.5 m) and would divide by zero below. Treat as fully deployed, the
+    # same degenerate-case default used for the cos_gamma <= 0 branch.
+    if h_win <= 0:
+        return 100.0
     sol_elev = math.radians(sol_elev_deg)
     gamma = math.radians(gamma_deg)
     cos_gamma = math.cos(gamma)

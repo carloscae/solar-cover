@@ -50,7 +50,7 @@ These settings apply to all your cover zones. Everything here is optional — yo
 | Setting | What it does |
 |---|---|
 | **Weather entity** | Connects a weather service so covers retract automatically in rain or strong wind |
-| **Retract in strong wind** | Wind speed above this value retracts all covers (in m/s). Leave empty to ignore wind. |
+| **Retract in strong wind** | Wind speed above this value retracts all covers (in km/h). Leave empty to ignore wind. |
 | **Minimum outdoor temperature** | Covers stay open below this temperature so the room can warm up in winter (°C) |
 | **Rest position** | Where covers sit when the sun is not hitting the window (0 = fully open, 100 = fully closed). Default is fully open. |
 | **Manual override duration** | After you move a cover by hand, automation pauses for this many minutes before resuming |
@@ -143,7 +143,8 @@ These are visible in the device page and useful for understanding what the syste
 
 | Sensor | What it shows |
 |---|---|
-| **Active intent** | The current decision and reason (see below) |
+| **Active intent** | The current decision category (see below) |
+| **Reason** | A plain-language sentence explaining the current decision, with a structured `reason_detail` attribute |
 | **Sun elevation** | How high the sun is above the horizon right now (degrees) |
 | **Sun azimuth** | The sun's compass direction right now (degrees) |
 | **Sun angle to window** | How directly the sun is facing your window. 0° means the sun is straight on; 90° means it is coming from the side. |
@@ -153,14 +154,12 @@ These are visible in the device page and useful for understanding what the syste
 | **Pending change commits** | When a delayed intent change will take effect (only while a stability delay is counting down). Shows what is waiting in its `pending_intent` attribute. |
 | **Manual hold expires** | When an active manual override will end and automation resumes |
 
-### Cover entity
+### Reason - the decision in detail
 
-The cover entity reflects the last position Solar Cover commanded. You can also use it in your own automations or dashboards.
+The **Reason** sensor explains the current decision in plain language, and carries a structured attribute for automations:
 
-Besides `intent`, it exposes two attributes that explain the current decision in detail:
-
-- **`reason`** - a plain-language sentence, e.g. `Retracted (weather): raining; wind 45 km/h exceeds 40 km/h limit`. Put it on a dashboard card to always see why the cover is where it is.
-- **`reason_detail`** - a structured list of the exact conditions that fired, each with the measured value, your threshold, the unit, and the margin (how far over or under). Ideal for templates and automations. When more than one condition applies (for example rain *and* high wind), every one is listed - so you know all the settings worth adjusting, not just the first.
+- **state** - a plain-language sentence, e.g. `Retracted (weather): raining; wind 45 km/h exceeds 40 km/h limit`. Put it on a dashboard card to always see why the covers are where they are.
+- **`reason_detail`** attribute - a structured list of the exact conditions that fired, each with the measured value, your threshold, the unit, and the margin (how far over or under). Ideal for templates and automations. When more than one condition applies (for example rain *and* high wind), every one is listed - so you know all the settings worth adjusting, not just the first.
 
 ---
 
@@ -185,11 +184,11 @@ The intent state tells you the *category*; the cover's **`reason`** and **`reaso
 
 Solar Cover checks a series of conditions in order. The first one that triggers stops the process:
 
-1. **Is the sun high enough?** Below the minimum angle, no shading needed.
-2. **Is the sun facing this window?** If the sun is behind the house or blocked by an obstacle, no shading needed.
-3. **Is the weather ok?** Rain, strong wind, or cold temperature keeps covers open.
-4. **Is there actual sunlight?** If a cloud or radiation sensor reports low light, no shading needed even if the sun is geometrically in the right position.
-5. **Did you move it manually?** If so, automation is paused.
+1. **Is the weather safe?** Rain, strong wind, or cold temperature retracts covers. This is checked first so safety always wins, even over a manual override.
+2. **Did you move it manually?** If so, automation holds your position and pauses the comfort checks below until the override timer runs out.
+3. **Is the sun high enough?** Below the minimum elevation angle, no shading needed.
+4. **Is the sun facing this window?** If the sun is behind the house or outside the field of view, no shading needed.
+5. **Is there actual sunlight?** If a radiation or cloud sensor reports low light, no shading needed even if the sun is geometrically in the right position.
 6. **Shade.** The geometry formula calculates the exact position for your cover type.
 
 ---
