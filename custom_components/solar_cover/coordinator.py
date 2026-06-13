@@ -626,8 +626,12 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         Filters out:
         - Covers that are still travelling (is_opening / is_closing attributes)
-        - State echoes from coordinator's own commands (30-second debounce window)
         - Position changes smaller than hysteresis (noise / rounding)
+        - State echoes from coordinator's own commands: changes within the
+          30-second debounce window that are also within a coasting margin
+          (2 × hysteresis) of the commanded position. A large divergence from
+          the commanded position is treated as an immediate manual countermand
+          and sets an override even within the debounce window.
         - Events while automation is disabled
         """
         new_state = event.data.get("new_state")
@@ -650,16 +654,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # blinds, otherwise the cover position.
         pos_attr = "current_tilt_position" if self._is_tilt() else "current_position"
 
-        # Debounce: ignore state echoes that arrive shortly after a coordinator command.
-        now = datetime.now(tz=UTC)
-        elapsed = (
-            (now - self._last_command_time).total_seconds()
-            if self._last_command_time is not None
-            else None
-        )
-        if elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS:
-            return
-
+        # Read position before the debounce check so we can distinguish a
+        # genuine echo (position near commanded) from an immediate manual
+        # countermand (position far from commanded).
         raw_pos = attrs.get(pos_attr)
         if raw_pos is None:
             return
@@ -678,7 +675,22 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
             )
         )
-        if abs(new_pos - last) < hysteresis:
+        delta = abs(new_pos - last)
+        if delta < hysteresis:
+            return
+
+        # Debounce: suppress echoes of a coordinator command that arrive shortly
+        # after the command. Only suppress when the delta is also within a
+        # coasting margin (2 × hysteresis) -- motor coasting a few percent past
+        # the target is still an echo. A move well outside that margin is a
+        # genuine immediate countermand and must set an override right away.
+        now = datetime.now(tz=UTC)
+        elapsed = (
+            (now - self._last_command_time).total_seconds()
+            if self._last_command_time is not None
+            else None
+        )
+        if elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS and delta < hysteresis * 2:
             return
 
         # External move confirmed -- set a manual override and remember the

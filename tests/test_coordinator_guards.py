@@ -183,16 +183,34 @@ class TestExternalMoveDetection:
         assert coord._last_commanded == pytest.approx(80.0)
         coord.hass.async_create_task.assert_called()
 
-    def test_recent_command_debounce_suppresses_trigger(self) -> None:
-        """State echo arriving within 30 s of a coordinator command is ignored."""
+    def test_recent_command_debounce_suppresses_small_delta(self) -> None:
+        """Motor coasting a few percent past the commanded position within the
+        debounce window is treated as an echo and does not set an override."""
         coord = _make_coordinator()
         coord._last_commanded = 50.0
+        # 4 % delta is above hysteresis (3 %) but within the coasting margin
+        # (2 × 3 % = 6 %), so a change arriving 5 s after a command is debounced.
         coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=5)
 
-        coord._handle_cover_state_change(self._make_event(80.0))
+        coord._handle_cover_state_change(self._make_event(54.0))
 
         assert coord._manual_override_until is None
         coord.hass.async_create_task.assert_not_called()
+
+    def test_large_delta_within_debounce_sets_override(self) -> None:
+        """An immediate manual countermand (large position divergence) must set an
+        override even if it arrives within the 30-second debounce window."""
+        coord = _make_coordinator()
+        coord._last_commanded = 80.0
+        # User closes the shade to 0 % just 5 s after the coordinator opened it.
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=5)
+
+        coord._handle_cover_state_change(self._make_event(0.0))
+
+        assert coord._manual_override_until is not None
+        assert coord._manual_position == pytest.approx(0.0)
+        assert coord._last_commanded == pytest.approx(0.0)
+        coord.hass.async_create_task.assert_called()
 
     def test_is_closing_suppresses_trigger(self) -> None:
         """Cover travelling to coordinator-commanded position is not external."""
