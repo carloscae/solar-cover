@@ -161,6 +161,7 @@ class TestExternalMoveDetection:
     ) -> MagicMock:
         """Build a fake state_changed event."""
         state = MagicMock()
+        state.state = "open"
         state.attributes = {"current_position": position}
         if is_opening:
             state.attributes["is_opening"] = True
@@ -211,6 +212,19 @@ class TestExternalMoveDetection:
         assert coord._manual_position == pytest.approx(0.0)
         assert coord._last_commanded == pytest.approx(0.0)
         coord.hass.async_create_task.assert_called()
+
+    def test_coasting_margin_boundary_sets_override(self) -> None:
+        """A delta exactly equal to the coasting margin (2 × hysteresis) is NOT
+        suppressed -- the strict less-than means the boundary favours the user."""
+        coord = _make_coordinator()
+        coord._last_commanded = 50.0
+        # delta = 6.0 == 2 × DEFAULT_HYSTERESIS (3.0); strict '<' lets it through.
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=5)
+
+        coord._handle_cover_state_change(self._make_event(56.0))
+
+        assert coord._manual_override_until is not None
+        assert coord._manual_position == pytest.approx(56.0)
 
     def test_is_closing_suppresses_trigger(self) -> None:
         """Cover travelling to coordinator-commanded position is not external."""
