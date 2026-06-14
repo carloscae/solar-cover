@@ -58,29 +58,37 @@ jobs:
             range="HEAD"
           fi
 
-          features=$(git log $range --pretty=format:"%s" | grep -E "^feat(\(.+\))?[!]?:" | sed 's/^feat[^:]*: /- /')
-          fixes=$(git log $range --pretty=format:"%s" | grep -E "^fix(\(.+\))?[!]?:" | sed 's/^fix[^:]*: /- /')
-          breaking=$(git log $range --pretty=format:"%s" | grep -E "^[a-z]+(\(.+\))?!:" | sed 's/^[^:]*!: /- /')
+          # Prefer the detailed body of the version-bump commit (HEAD): authors
+          # write rich, grouped notes there. Strip commit trailers (Co-authored-by
+          # etc.) and trailing blank lines. Fall back to grouped commit subjects
+          # since the previous tag when the bump commit has no body.
+          body=$(git log -1 --pretty=format:%b HEAD \
+            | grep -viE '^(co-authored-by|signed-off-by):' \
+            | awk 'NF{last=NR} {line[NR]=$0} END{for (i=1; i<=last; i++) print line[i]}')
 
-          notes=""
+          if [ -n "$body" ]; then
+            printf '%s\n\n' "$body" > release_notes.md
+          else
+            features=$(git log $range --pretty=format:"%s" | grep -E "^feat(\(.+\))?[!]?:" | sed 's/^feat[^:]*: /- /')
+            fixes=$(git log $range --pretty=format:"%s" | grep -E "^fix(\(.+\))?[!]?:" | sed 's/^fix[^:]*: /- /')
+            breaking=$(git log $range --pretty=format:"%s" | grep -E "^[a-z]+(\(.+\))?!:" | sed 's/^[^:]*!: /- /')
 
-          if [ -n "$breaking" ]; then
-            notes="${notes}## Breaking changes\n${breaking}\n\n"
+            : > release_notes.md
+            if [ -n "$breaking" ]; then
+              printf '## Breaking changes\n%s\n\n' "$breaking" >> release_notes.md
+            fi
+            if [ -n "$features" ]; then
+              printf "## What's new\n%s\n\n" "$features" >> release_notes.md
+            fi
+            if [ -n "$fixes" ]; then
+              printf '## Bug fixes\n%s\n\n' "$fixes" >> release_notes.md
+            fi
+            if [ ! -s release_notes.md ]; then
+              printf 'Maintenance release - see commit history for details.\n\n' > release_notes.md
+            fi
           fi
-          if [ -n "$features" ]; then
-            notes="${notes}## What's new\n${features}\n\n"
-          fi
-          if [ -n "$fixes" ]; then
-            notes="${notes}## Bug fixes\n${fixes}\n\n"
-          fi
 
-          if [ -z "$notes" ]; then
-            notes="Maintenance release — see commit history for details."
-          fi
-
-          notes="${notes}**Full changelog:** https://github.com/${{ github.repository }}/compare/${prev}...${version}"
-
-          printf "%b" "$notes" > release_notes.md
+          printf '%s\n' "**Full changelog:** https://github.com/${{ github.repository }}/compare/${prev}...${version}" >> release_notes.md
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
