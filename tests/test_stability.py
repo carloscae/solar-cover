@@ -114,9 +114,11 @@ class TestDelayHolds:
 
     def test_candidate_change_keeps_clock_running(self) -> None:
         # Two different "worsening" candidates alternating must NOT keep
-        # resetting the clock -- otherwise a stormy day (clouds + wind flipping)
-        # would pin the cover deployed forever. The clock measures time since
-        # we diverged from the committed intent.
+        # resetting the clock -- otherwise a flickering day (clouds + sun-low
+        # flipping) would pin the cover deployed forever. The clock measures
+        # time since we diverged from the committed intent. (Weather is exempt
+        # from the hold entirely -- safety wins -- so a non-weather worsening
+        # candidate is used here.)
         coord = _make_coordinator({CONF_STABILITY_DELAY: 10})
         coord._last_intent = Intent.SHADING
 
@@ -125,8 +127,8 @@ class TestDelayHolds:
 
         # A different worsening candidate arrives -- clock keeps its origin.
         t1 = _T0 + timedelta(minutes=4)
-        assert coord._evaluate_stability(Intent.INACTIVE_WEATHER, t1) is False
-        assert coord._pending_intent == Intent.INACTIVE_WEATHER
+        assert coord._evaluate_stability(Intent.INACTIVE_SUN_LOW, t1) is False
+        assert coord._pending_intent == Intent.INACTIVE_SUN_LOW
         assert coord._pending_since == _T0
 
         # Delay measured from the original divergence -- commits at T0 + 10.
@@ -187,8 +189,9 @@ class TestDirectionFlags:
             }
         )
         coord._last_intent = Intent.SHADING
-        assert coord._evaluate_stability(Intent.INACTIVE_WEATHER, _T0) is False
-        assert coord._pending_intent == Intent.INACTIVE_WEATHER
+        # A non-weather worsening candidate (weather is exempt from the hold).
+        assert coord._evaluate_stability(Intent.INACTIVE_OVERCAST, _T0) is False
+        assert coord._pending_intent == Intent.INACTIVE_OVERCAST
 
 
 class TestClassifyTransition:
@@ -229,6 +232,43 @@ class TestClassifyTransition:
         # _last_intent is None on first evaluation.
         assert coord._evaluate_stability(Intent.SHADING, _T0) is True
         assert coord._pending_intent is None
+
+
+class TestWeatherBypassesHold:
+    """Safety wins immediately: a transition into INACTIVE_WEATHER must never be
+    delayed by the stability window, even though it classifies as 'worsening'."""
+
+    def test_weather_commits_immediately_despite_delay(self) -> None:
+        coord = _make_coordinator(
+            {
+                CONF_STABILITY_DELAY: 10,
+                CONF_STABILITY_DELAY_ON_WORSENING: True,
+                CONF_STABILITY_DELAY_ON_RECOVERY: True,
+            }
+        )
+        coord._last_intent = Intent.SHADING
+        # High wind / rain -> retract right now, no waiting out the window.
+        assert coord._evaluate_stability(Intent.INACTIVE_WEATHER, _T0) is True
+        assert coord._pending_intent is None
+        assert coord._pending_since is None
+
+    def test_weather_bypass_clears_existing_hold(self) -> None:
+        # A worsening overcast candidate is mid-hold when weather suddenly turns
+        # dangerous; the weather retraction must commit at once and clear the
+        # stale pending overcast hold.
+        coord = _make_coordinator({CONF_STABILITY_DELAY: 10})
+        coord._last_intent = Intent.SHADING
+        assert coord._evaluate_stability(Intent.INACTIVE_OVERCAST, _T0) is False
+        assert coord._pending_intent == Intent.INACTIVE_OVERCAST
+
+        assert (
+            coord._evaluate_stability(
+                Intent.INACTIVE_WEATHER, _T0 + timedelta(minutes=2)
+            )
+            is True
+        )
+        assert coord._pending_intent is None
+        assert coord._pending_since is None
 
 
 class TestStabilityEndToEnd:

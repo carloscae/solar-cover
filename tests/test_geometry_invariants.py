@@ -54,6 +54,22 @@ class TestVerticalInvariants:
             assert result >= prev - 1e-9, (elev, result, prev)
             prev = result
 
+    def test_past_90_off_axis_is_retracted(self) -> None:
+        # cos_gamma <= 0 branch -- sun behind the window plane, no direct sun to
+        # block, so the blind retracts to 0. (Exactly 90.0 is excluded: in
+        # floating point cos(radians(90)) is a tiny positive, so the grazing-sun
+        # formula runs there rather than this branch.)
+        for gamma in [90.001, 95.0, 130.0, 179.0]:
+            assert (
+                vertical_position(
+                    sol_elev_deg=30.0,
+                    gamma_deg=gamma,
+                    distance=1.0,
+                    h_win=2.5,
+                )
+                == 0.0
+            ), gamma
+
     def test_zero_window_height_is_total(self) -> None:
         # Defensive guard: no ZeroDivisionError, returns the degenerate default.
         assert (
@@ -80,6 +96,34 @@ class TestHorizontalInvariants:
                     distance=1.0,
                 )
                 assert _ok(result), (elev, gamma, awn_length, awn_angle, h_win, result)
+
+    def test_zero_awn_length_is_total(self) -> None:
+        # Degenerate denominator across the grid: awn_length == 0 must not raise.
+        for elev in _ELEVATIONS:
+            for gamma in _GAMMAS:
+                result = horizontal_position(
+                    sol_elev_deg=elev,
+                    gamma_deg=gamma,
+                    h_win=2.5,
+                    awn_length=0.0,
+                    awn_angle_deg=15.0,
+                    distance=1.0,
+                )
+                assert result == 0.0, (elev, gamma, result)
+
+    def test_zero_h_win_is_total(self) -> None:
+        # Degenerate input across the grid: h_win == 0 must not raise.
+        for elev in _ELEVATIONS:
+            for gamma in _GAMMAS:
+                result = horizontal_position(
+                    sol_elev_deg=elev,
+                    gamma_deg=gamma,
+                    h_win=0.0,
+                    awn_length=3.0,
+                    awn_angle_deg=15.0,
+                    distance=1.0,
+                )
+                assert result == 0.0, (elev, gamma, result)
 
     def test_past_90_off_axis_is_retracted(self) -> None:
         # cos_gamma <= 0 branch -- continuous with the formula's limit, returns 0.
@@ -118,6 +162,20 @@ class TestTiltInvariants:
                     bidirectional=bidirectional,
                 )
                 assert _ok(result), (elev, gamma, width, spacing, bidirectional, result)
+
+    def test_zero_slat_width_is_total(self) -> None:
+        # Degenerate denominator across the grid: slat_width_mm == 0 must not raise.
+        for bidirectional in (False, True):
+            for elev in _ELEVATIONS:
+                for gamma in _GAMMAS:
+                    result = tilt_position(
+                        sol_elev_deg=elev,
+                        gamma_deg=gamma,
+                        slat_width_mm=0.0,
+                        slat_spacing_mm=50.0,
+                        bidirectional=bidirectional,
+                    )
+                    assert result == 100.0, (elev, gamma, bidirectional, result)
 
     def test_bidirectional_is_half_of_single_when_unclamped(self) -> None:
         for elev in [20.0, 25.0, 30.0, 35.0]:

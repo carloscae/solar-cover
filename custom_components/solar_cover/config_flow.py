@@ -73,6 +73,48 @@ def _validate_min_max(user_input: dict[str, Any], errors: dict[str, str]) -> Non
         errors[CONF_MIN_POSITION] = "min_exceeds_max"
 
 
+def _fov_max(cover_type: CoverType) -> int:
+    """FOV cap per cover type: 180 for horizontal awnings, 90 otherwise."""
+    return 180 if cover_type == CoverType.HORIZONTAL else 90
+
+
+def _validate_fov(
+    user_input: dict[str, Any], cover_type: CoverType, errors: dict[str, str]
+) -> None:
+    """Reject an FOV above 90 deg for vertical/tilt covers (server-side guard)."""
+    cap = _fov_max(cover_type)
+    for key in (CONF_FOV_LEFT, CONF_FOV_RIGHT):
+        value = user_input.get(key)
+        if value is not None and float(value) > cap:
+            errors[key] = "fov_out_of_range"
+
+
+def _fov_selector(cover_type: CoverType) -> selector.NumberSelector:
+    """Build an FOV NumberSelector capped to the cover type's maximum."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=1,
+            max=_fov_max(cover_type),
+            step=1,
+            mode=NumberSelectorMode.SLIDER,
+            unit_of_measurement="deg",
+        )
+    )
+
+
+def _hysteresis_selector() -> selector.NumberSelector:
+    """Build the per-zone / global motor hysteresis NumberSelector."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0,
+            max=20,
+            step=0.5,
+            mode=NumberSelectorMode.SLIDER,
+            unit_of_measurement="%",
+        )
+    )
+
+
 class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
     """Multi-step config flow: integration (global) then zone (per cover group)."""
 
@@ -111,6 +153,8 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle integration-level (global) settings."""
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
         if user_input is not None:
             data = {
                 "entry_type": ENTRY_TYPE_INTEGRATION,
@@ -249,6 +293,7 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                 if slat_spacing > slat_width:
                     errors[CONF_SLAT_SPACING] = "spacing_exceeds_width"
             _validate_min_max(user_input, errors)
+            _validate_fov(user_input, cover_type, errors)
             if not errors:
                 title = f"Zone: {self._zone_partial.get(CONF_NAME, 'Cover Zone')}"
                 return self.async_create_entry(
@@ -271,24 +316,8 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                     unit_of_measurement="deg",
                 )
             ),
-            vol.Required(CONF_FOV_LEFT, default=90): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1,
-                    max=180,
-                    step=1,
-                    mode=NumberSelectorMode.SLIDER,
-                    unit_of_measurement="deg",
-                )
-            ),
-            vol.Required(CONF_FOV_RIGHT, default=90): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=1,
-                    max=180,
-                    step=1,
-                    mode=NumberSelectorMode.SLIDER,
-                    unit_of_measurement="deg",
-                )
-            ),
+            vol.Required(CONF_FOV_LEFT, default=90): _fov_selector(cover_type),
+            vol.Required(CONF_FOV_RIGHT, default=90): _fov_selector(cover_type),
             vol.Required(
                 CONF_ELEVATION_THRESHOLD, default=auto_threshold
             ): selector.NumberSelector(
@@ -411,8 +440,16 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                     selector.SelectSelectorConfig(options=[e.value for e in TiltRange])
                 )
             )
+        # Advanced: per-zone motor hysteresis. Unset by default so the
+        # integration-global value remains the fallback in the coordinator.
+        fields[vol.Optional(CONF_HYSTERESIS)] = _hysteresis_selector()
+
+        schema = vol.Schema(fields)
+        if user_input is not None:
+            # Preserve the user's just-entered values when re-rendering on error.
+            schema = self.add_suggested_values_to_schema(schema, user_input)
         return self.async_show_form(
-            step_id="zone_configure", data_schema=vol.Schema(fields), errors=errors
+            step_id="zone_configure", data_schema=schema, errors=errors
         )
 
 
@@ -565,18 +602,24 @@ class ZoneOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Step 1: common fields + cover type selection. Routes to geometry step."""
         errors: dict[str, str] = {}
+        data = {**self._entry.data, **self._entry.options}
         if user_input is not None:
+            submitted_type = CoverType(user_input[CONF_COVER_TYPE])
             _validate_min_max(user_input, errors)
+            _validate_fov(user_input, submitted_type, errors)
             if not errors:
                 self._partial = dict(user_input)
-                cover_type = CoverType(user_input[CONF_COVER_TYPE])
-                if cover_type == CoverType.HORIZONTAL:
+                if submitted_type == CoverType.HORIZONTAL:
                     return await self.async_step_geometry_horizontal()
-                if cover_type == CoverType.TILT:
+                if submitted_type == CoverType.TILT:
                     return await self.async_step_geometry_tilt()
                 return await self.async_step_geometry_vertical()
 
-        data = {**self._entry.data, **self._entry.options}
+        # The FOV cap follows the cover type the user just chose (if any),
+        # otherwise the stored type.
+        cover_type = CoverType(
+            (user_input or data).get(CONF_COVER_TYPE, CoverType.VERTICAL)
+        )
         auto_threshold = _auto_elevation_threshold(self.hass.config)
         schema = vol.Schema(
             {
@@ -607,26 +650,10 @@ class ZoneOptionsFlow(OptionsFlow):
                 ),
                 vol.Required(
                     CONF_FOV_LEFT, default=data.get(CONF_FOV_LEFT, 90)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1,
-                        max=180,
-                        step=1,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="deg",
-                    )
-                ),
+                ): _fov_selector(cover_type),
                 vol.Required(
                     CONF_FOV_RIGHT, default=data.get(CONF_FOV_RIGHT, 90)
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1,
-                        max=180,
-                        step=1,
-                        mode=NumberSelectorMode.SLIDER,
-                        unit_of_measurement="deg",
-                    )
-                ),
+                ): _fov_selector(cover_type),
                 vol.Required(
                     CONF_ELEVATION_THRESHOLD,
                     default=data.get(CONF_ELEVATION_THRESHOLD, auto_threshold),
@@ -661,8 +688,19 @@ class ZoneOptionsFlow(OptionsFlow):
                         unit_of_measurement="%",
                     )
                 ),
+                # Advanced: per-zone motor hysteresis. Unset by default so the
+                # integration-global value remains the coordinator fallback.
+                vol.Optional(CONF_HYSTERESIS): _hysteresis_selector(),
             }
         )
+        if user_input is not None:
+            # Preserve just-entered values when re-rendering on a validation error.
+            schema = self.add_suggested_values_to_schema(schema, user_input)
+        elif data.get(CONF_HYSTERESIS) is not None:
+            # Surface a previously stored per-zone hysteresis as the form default.
+            schema = self.add_suggested_values_to_schema(
+                schema, {CONF_HYSTERESIS: data.get(CONF_HYSTERESIS)}
+            )
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
 
     async def async_step_geometry_vertical(
@@ -814,6 +852,9 @@ class ZoneOptionsFlow(OptionsFlow):
                 ),
             }
         )
+        if user_input is not None:
+            # Preserve just-entered values when re-rendering on a validation error.
+            schema = self.add_suggested_values_to_schema(schema, user_input)
         return self.async_show_form(
             step_id="geometry_tilt", data_schema=schema, errors=errors
         )

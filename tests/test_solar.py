@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from unittest.mock import patch
 
 import pytest
 
-from custom_components.solar_cover.solar import SolarEngine
+from custom_components.solar_cover.solar import SolarEngine, _gamma, gamma
 
 
 @pytest.fixture
@@ -81,3 +82,58 @@ class TestFovWindow:
         )
         assert entry is None
         assert exit_ is None
+
+
+class TestCurveCaching:
+    """position_curve / hourly_curve are memoised per date; a repeat call for the
+    same date must not recompute the astral samples."""
+
+    def test_position_curve_cached_for_same_date(
+        self, vienna_engine: SolarEngine
+    ) -> None:
+        d = date(2026, 6, 21)
+        with patch.object(
+            vienna_engine, "sun_position", wraps=vienna_engine.sun_position
+        ) as spy:
+            first = vienna_engine.position_curve(d)
+            calls_after_first = spy.call_count
+            second = vienna_engine.position_curve(d)
+            # No additional sun_position calls -- served from the cache.
+            assert spy.call_count == calls_after_first
+            assert calls_after_first == 288
+            assert second is first
+
+    def test_hourly_curve_cached_for_same_date(
+        self, vienna_engine: SolarEngine
+    ) -> None:
+        d = date(2026, 6, 21)
+        with patch.object(
+            vienna_engine, "sun_position", wraps=vienna_engine.sun_position
+        ) as spy:
+            vienna_engine.hourly_curve(d)
+            calls_after_first = spy.call_count
+            vienna_engine.hourly_curve(d)
+            assert spy.call_count == calls_after_first
+            assert calls_after_first == 24
+
+    def test_cache_recomputes_on_date_rollover(
+        self, vienna_engine: SolarEngine
+    ) -> None:
+        with patch.object(
+            vienna_engine, "sun_position", wraps=vienna_engine.sun_position
+        ) as spy:
+            vienna_engine.hourly_curve(date(2026, 6, 21))
+            assert spy.call_count == 24
+            vienna_engine.hourly_curve(date(2026, 6, 22))
+            # New date -> cache miss -> recompute.
+            assert spy.call_count == 48
+
+
+class TestGammaPublic:
+    def test_gamma_is_public(self) -> None:
+        # Sun 30 deg to the right of a south window.
+        assert gamma(180.0, 210.0) == pytest.approx(-30.0)
+
+    def test_gamma_backward_compatible_alias(self) -> None:
+        # The old private name still resolves to the same function.
+        assert _gamma is gamma

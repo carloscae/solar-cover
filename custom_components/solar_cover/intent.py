@@ -10,7 +10,8 @@ from datetime import datetime
 
 from .const import CoverType, Intent, ReasonCode, TiltRange
 from .geometry import horizontal_position, tilt_position, vertical_position
-from .solar import _gamma
+from .solar import _in_fov
+from .solar import gamma as compute_gamma
 
 
 @dataclass
@@ -163,8 +164,8 @@ def evaluate_intent(inp: IntentInput) -> IntentResult:
         )
 
     # Gate 4: FOV
-    gamma = _gamma(inp.win_azimuth_deg, inp.sol_azimuth_deg)
-    if not (gamma < inp.fov_left and gamma > -inp.fov_right):
+    gamma = compute_gamma(inp.win_azimuth_deg, inp.sol_azimuth_deg)
+    if not _in_fov(gamma, inp.fov_left, inp.fov_right):
         # Positive gamma = sun to the left; negative = sun to the right. Report
         # the off-axis magnitude against the (positive) edge limit so measured,
         # threshold, and margin all stay on the same scale as the text.

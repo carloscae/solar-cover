@@ -38,6 +38,7 @@ def _make_coordinator_data(
     stability_pending_until: str | None = None,
     pending_intent: str | None = None,
     manual_override_until: str | None = None,
+    position_curve: list[dict[str, object]] | None = None,
 ) -> CoordinatorData:
     return CoordinatorData(
         intent=intent,
@@ -46,7 +47,7 @@ def _make_coordinator_data(
         sun_azimuth=sun_azimuth,
         sun_elevation=sun_elevation,
         gamma=gamma,
-        position_curve=[],
+        position_curve=position_curve if position_curve is not None else [],
         fov_entry=fov_entry,
         fov_exit=fov_exit,
         reason=reason,
@@ -94,6 +95,7 @@ class TestSensorDescriptions:
             "sun_azimuth",
             "surface_azimuth",
             "computed_position",
+            "commanded_position",
             "fov_entry",
             "fov_exit",
             "stability_pending_until",
@@ -101,8 +103,16 @@ class TestSensorDescriptions:
         }
         assert keys == expected
 
-    def test_all_descriptions_are_diagnostic(self) -> None:
+    def test_intent_and_reason_are_primary_entities(self) -> None:
+        # intent and reason are the PRIMARY debugging surface, not diagnostic.
+        for key in ("intent", "reason"):
+            desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == key)
+            assert desc.entity_category is None, f"{key} should be a primary entity"
+
+    def test_remaining_descriptions_are_diagnostic(self) -> None:
         for desc in SENSOR_DESCRIPTIONS:
+            if desc.key in ("intent", "reason"):
+                continue
             assert desc.entity_category == EntityCategory.DIAGNOSTIC, (
                 f"{desc.key} should be DIAGNOSTIC"
             )
@@ -113,6 +123,7 @@ class TestSensorDescriptions:
             "sun_azimuth",
             "surface_azimuth",
             "computed_position",
+            "commanded_position",
         }
         for desc in SENSOR_DESCRIPTIONS:
             if desc.key in measurement_keys:
@@ -164,12 +175,29 @@ class TestSensorValueFunctions:
         result = self._get_desc("computed_position").value_fn(data)
         assert result == 73.5
 
-    def test_computed_position_falls_back_to_commanded_when_inactive(self) -> None:
-        # When the geometry didn't run (inactive intent), the sensor falls back to
-        # the commanded position so it never goes unavailable.
+    def test_computed_position_returns_none_when_unset(self) -> None:
+        # When the geometry didn't run (inactive intent), computed_position is the
+        # distinct "no calculation" signal -- it must not borrow the commanded value.
         data = _make_coordinator_data(computed_position=None, commanded_position=0.0)
         result = self._get_desc("computed_position").value_fn(data)
-        assert result == 0.0
+        assert result is None
+
+    def test_commanded_position_rounds_to_one_decimal(self) -> None:
+        data = _make_coordinator_data(commanded_position=42.345)
+        result = self._get_desc("commanded_position").value_fn(data)
+        assert result == 42.3
+
+    def test_intent_exposes_position_curve_attr(self) -> None:
+        curve = [{"time": "2026-05-28T08:00:00+00:00", "position": 50}]
+        data = _make_coordinator_data(position_curve=curve)
+        attrs = self._get_desc("intent").attr_fn(data)
+        assert attrs == {"position_curve": curve}
+        assert isinstance(attrs["position_curve"], list)
+
+    def test_intent_position_curve_attr_is_list_when_empty(self) -> None:
+        data = _make_coordinator_data(position_curve=[])
+        attrs = self._get_desc("intent").attr_fn(data)
+        assert isinstance(attrs["position_curve"], list)
 
     def test_fov_entry_returns_datetime_object(self) -> None:
         data = _make_coordinator_data(fov_entry="2026-05-28T08:30:00+00:00")
@@ -273,7 +301,7 @@ def _enable_custom_integrations(enable_custom_integrations: None) -> None:  # no
 
 
 async def test_sensor_platform_creates_all_entities(hass: HomeAssistant) -> None:
-    """All 7 sensor descriptions should produce entities when the platform loads."""
+    """All 11 sensor descriptions should produce entities when the platform loads."""
     integration_entry = MockConfigEntry(
         domain=DOMAIN,
         data={"entry_type": "integration"},

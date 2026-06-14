@@ -35,7 +35,10 @@ def vertical_position(
     gamma = math.radians(gamma_deg)
     cos_gamma = math.cos(gamma)
     if cos_gamma <= 0:
-        return 100.0
+        # Sun is behind the window plane (gamma >= 90 deg off-axis): there is no
+        # direct sun on the glass to block, so the blind retracts. This matches
+        # the horizontal twin's oblique-sun behavior (it returns 0.0 here too).
+        return 0.0
     blind_height = min((distance / cos_gamma) * math.tan(sol_elev), h_win)
     blind_height = max(blind_height, 0.0)
     return blind_height / h_win * 100.0
@@ -65,6 +68,13 @@ def horizontal_position(
     Returns:
         Position percentage (0 = retracted, 100 = fully extended).
     """
+    # Defensive: a non-positive awning length or window height degenerates the
+    # formula (division by zero in the final length/awn_length step, or a
+    # collapsed window). This is a "total across the range" function, so return
+    # 0.0 (retracted) instead of raising.
+    if awn_length <= 0 or h_win <= 0:
+        return 0.0
+
     sol_elev = math.radians(sol_elev_deg)
     gamma = math.radians(gamma_deg)
     awn_angle = math.radians(awn_angle_deg)
@@ -117,6 +127,12 @@ def tilt_position(
 
     cos_gamma = math.cos(gamma)
     if abs(cos_gamma) < 1e-9:
+        return 100.0
+
+    # Defensive: a non-positive slat width would divide by zero in the ratio
+    # below. Return 100.0 (fully closed), the same safe fallback used for the
+    # negative-discriminant case.
+    if slat_width_mm <= 0:
         return 100.0
 
     beta = math.atan(math.tan(sol_elev) / cos_gamma)

@@ -85,6 +85,71 @@ class TestStatePersistence:
         await coord.async_restore_state()
         assert coord._last_commanded is None
 
+    @pytest.mark.asyncio
+    async def test_restore_state_rehydrates_active_override(self) -> None:
+        # A restart mid-override must restore both the manual position and the
+        # (still-future) expiry so the user's hold survives the reboot.
+        coord = _make_coordinator()
+        until = (datetime.now(tz=UTC) + timedelta(minutes=90)).isoformat()
+        coord._store.async_load = AsyncMock(
+            return_value={
+                "last_commanded": 70.0,
+                "manual_position": 70.0,
+                "manual_override_until": until,
+            }
+        )
+        await coord.async_restore_state()
+        assert coord._last_commanded == pytest.approx(70.0)
+        assert coord._manual_position == pytest.approx(70.0)
+        assert coord._manual_override_until is not None
+        assert coord._manual_override_until.isoformat() == until
+
+    @pytest.mark.asyncio
+    async def test_restore_state_drops_expired_override(self) -> None:
+        # An override that expired while HA was down must not be restored --
+        # restoring a stale hold would needlessly suppress automation.
+        coord = _make_coordinator()
+        until = (datetime.now(tz=UTC) - timedelta(minutes=5)).isoformat()
+        coord._store.async_load = AsyncMock(
+            return_value={
+                "last_commanded": 70.0,
+                "manual_position": 70.0,
+                "manual_override_until": until,
+            }
+        )
+        await coord.async_restore_state()
+        assert coord._last_commanded == pytest.approx(70.0)
+        assert coord._manual_override_until is None
+        assert coord._manual_position is None
+
+    @pytest.mark.asyncio
+    async def test_store_payload_includes_override_fields(self) -> None:
+        coord = _make_coordinator()
+        until = datetime.now(tz=UTC) + timedelta(minutes=30)
+        coord._last_commanded = 42.0
+        coord._manual_position = 42.0
+        coord._manual_override_until = until
+        payload = coord._store_payload()
+        assert payload["last_commanded"] == pytest.approx(42.0)
+        assert payload["manual_position"] == pytest.approx(42.0)
+        assert payload["manual_override_until"] == until.isoformat()
+
+
+class TestRestoreEnabled:
+    def test_restore_enabled_sets_flag_without_refresh(self) -> None:
+        coord = _make_coordinator()
+        coord.restore_enabled(False)
+        assert coord.enabled is False
+        # Pure state restore -- must NOT schedule a refresh (unlike set_enabled).
+        coord.hass.async_create_task.assert_not_called()
+
+    def test_restore_enabled_true(self) -> None:
+        coord = _make_coordinator()
+        coord._enabled = False
+        coord.restore_enabled(True)
+        assert coord.enabled is True
+        coord.hass.async_create_task.assert_not_called()
+
 
 class TestManualOverride:
     @staticmethod
@@ -257,15 +322,33 @@ class TestExternalMoveDetection:
 
         assert coord._manual_override_until is None
 
-    def test_no_last_commanded_skips_detection(self) -> None:
-        """If the coordinator has never commanded a position, skip detection."""
+    def test_no_last_commanded_adopts_external_move(self) -> None:
+        """With no baseline (e.g. HA restarted at night, sun below threshold all
+        morning), a genuine external move by remote must still be adopted as an
+        override rather than silently dropped."""
         coord = _make_coordinator()
         coord._last_commanded = None
-        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=60)
+        # No command was ever issued, so no debounce window is open.
+        coord._last_command_time = None
+
+        coord._handle_cover_state_change(self._make_event(80.0))
+
+        assert coord._manual_override_until is not None
+        assert coord._manual_position == pytest.approx(80.0)
+        assert coord._last_commanded == pytest.approx(80.0)
+        coord.hass.async_create_task.assert_called()
+
+    def test_no_last_commanded_in_debounce_window_ignored(self) -> None:
+        """A move with no baseline that lands inside the post-command debounce
+        window is an echo of a just-issued command and must still be ignored."""
+        coord = _make_coordinator()
+        coord._last_commanded = None
+        coord._last_command_time = datetime.now(tz=UTC) - timedelta(seconds=5)
 
         coord._handle_cover_state_change(self._make_event(80.0))
 
         assert coord._manual_override_until is None
+        assert coord._manual_position is None
 
     def test_none_new_state_skips_detection(self) -> None:
         """Event with no new_state (entity removed) is handled gracefully."""

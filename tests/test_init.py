@@ -7,14 +7,17 @@ any reliance on hass.data.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.solar_cover import async_migrate_entry
+from custom_components.solar_cover import (
+    _async_update_integration_listener,
+    async_migrate_entry,
+)
 from custom_components.solar_cover.const import (
     CONF_WIND_THRESHOLD,
     DOMAIN,
@@ -134,6 +137,53 @@ class TestDiagnosticsUnit:
         assert "state" not in diag
 
 
+class TestCascadeReloadResilience:
+    """A global-settings change reloads the integration entry plus every zone.
+    One zone failing to reload must not strand the rest on stale settings."""
+
+    async def test_one_zone_failure_does_not_block_others(
+        self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        integration = _integration_entry(hass)
+        zone_a = _zone_entry(hass)
+        zone_b = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "North",
+                "cover_type": "vertical",
+                "azimuth": 0,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": [],
+            },
+            title="Zone: North",
+        )
+        zone_b.add_to_hass(hass)
+
+        reloaded: list[str] = []
+
+        async def fake_reload(entry_id: str) -> bool:
+            reloaded.append(entry_id)
+            if entry_id == zone_a.entry_id:
+                raise RuntimeError("zone A blew up")
+            return True
+
+        with (
+            patch.object(hass.config_entries, "async_reload", side_effect=fake_reload),
+            caplog.at_level("ERROR"),
+        ):
+            await _async_update_integration_listener(hass, integration)
+
+        # The integration entry and BOTH zones were attempted despite zone A
+        # raising -- the loop did not abort on the first failure.
+        assert integration.entry_id in reloaded
+        assert zone_a.entry_id in reloaded
+        assert zone_b.entry_id in reloaded
+        assert zone_a.entry_id in caplog.text
+
+
 class TestMigration:
     async def test_v1_wind_threshold_converted_to_kmh(
         self, hass: HomeAssistant
@@ -195,3 +245,21 @@ class TestMigration:
         assert entry.version == 2
         # Already km/h -- must NOT be rescaled again.
         assert entry.data[CONF_WIND_THRESHOLD] == 40
+
+    async def test_downgrade_from_v3_refused_and_logged(
+        self, hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # A config entry written by a newer integration version (schema > 2)
+        # cannot be safely downgraded; migration must refuse and explain why.
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={"entry_type": ENTRY_TYPE_INTEGRATION},
+            title="Global Settings",
+            version=3,
+        )
+        entry.add_to_hass(hass)
+
+        with caplog.at_level("ERROR"):
+            assert await async_migrate_entry(hass, entry) is False
+        assert "downgrade" in caplog.text.lower()
+        assert entry.entry_id in caplog.text

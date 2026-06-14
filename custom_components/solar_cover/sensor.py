@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -28,9 +28,6 @@ from .coordinator import (
 
 # Read-only diagnostic sensors backed by the coordinator; no device I/O to serialise.
 PARALLEL_UPDATES = 0
-
-_DEGREE = "°"
-_PERCENTAGE = "%"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,21 +43,20 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         key="intent",
         translation_key="intent",
         icon="mdi:sun-compass",
-        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.intent.value,
+        attr_fn=lambda d: {"position_curve": d.position_curve},
     ),
     SolarCoverSensorDescription(
         key="reason",
         translation_key="reason",
         icon="mdi:text",
-        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: d.reason,
         attr_fn=lambda d: {"reason_detail": d.reason_detail},
     ),
     SolarCoverSensorDescription(
         key="sun_elevation",
         translation_key="sun_elevation",
-        native_unit_of_measurement=_DEGREE,
+        native_unit_of_measurement=DEGREE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:angle-acute",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -69,7 +65,7 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
     SolarCoverSensorDescription(
         key="sun_azimuth",
         translation_key="sun_azimuth",
-        native_unit_of_measurement=_DEGREE,
+        native_unit_of_measurement=DEGREE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:compass",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -78,7 +74,7 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
     SolarCoverSensorDescription(
         key="surface_azimuth",
         translation_key="surface_azimuth",
-        native_unit_of_measurement=_DEGREE,
+        native_unit_of_measurement=DEGREE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:angle-right",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -87,15 +83,22 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
     SolarCoverSensorDescription(
         key="computed_position",
         translation_key="computed_position",
-        native_unit_of_measurement=_PERCENTAGE,
+        native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:percent",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda d: (
-            round(d.computed_position, 1)
-            if d.computed_position is not None
-            else round(d.commanded_position, 1)
+            round(d.computed_position, 1) if d.computed_position is not None else None
         ),
+    ),
+    SolarCoverSensorDescription(
+        key="commanded_position",
+        translation_key="commanded_position",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:percent",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda d: round(d.commanded_position, 1),
     ),
     SolarCoverSensorDescription(
         key="fov_entry",

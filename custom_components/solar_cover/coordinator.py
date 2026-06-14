@@ -6,6 +6,7 @@ Computes sun position, evaluates intent, applies hysteresis, commands entities.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -64,7 +65,7 @@ from .const import (
 )
 from .intent import IntentInput, evaluate_intent
 from .solar import SolarEngine
-from .solar import _gamma as compute_gamma
+from .solar import gamma as compute_gamma
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -200,6 +201,10 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._unsub_covers: Any = None
         self._last_command_time: datetime | None = None
         self._store: Store[dict[str, Any]] = Store(hass, 1, f"solar_cover.{entry_id}")
+        # Serialises the mutate-and-command section of _async_update_data so a
+        # burst of sensor state_changed events (each scheduling a refresh) cannot
+        # interleave mutations of _last_commanded / _pending_since.
+        self._update_lock = asyncio.Lock()
 
         watch = [
             e
@@ -247,16 +252,57 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._clear_pending()
         self.hass.async_create_task(self.async_request_refresh())
 
+    def restore_enabled(self, value: bool) -> None:
+        """Set the enabled flag without triggering a refresh.
+
+        Used by the switch entity to restore its persisted on/off state during
+        startup, where firing a refresh (and re-commanding covers) would be
+        wrong. Unlike :meth:`set_enabled` this is a pure state assignment and
+        does not touch the stability hold.
+        """
+        self._enabled = value
+
     def _clear_pending(self) -> None:
         """Drop any in-flight stability hold."""
         self._pending_intent = None
         self._pending_since = None
 
+    def _store_payload(self) -> dict[str, Any]:
+        """Build the persisted-state payload.
+
+        ``last_commanded`` survives a restart so a night-time reboot does not
+        re-open a manually-closed cover. ``manual_position`` and
+        ``manual_override_until`` survive too, so a restart mid-override does not
+        silently drop the user's manual hold.
+        """
+        return {
+            "last_commanded": self._last_commanded,
+            "manual_position": self._manual_position,
+            "manual_override_until": (
+                self._manual_override_until.isoformat()
+                if self._manual_override_until is not None
+                else None
+            ),
+        }
+
     async def async_restore_state(self) -> None:
-        """Load persisted last-commanded position from storage."""
+        """Load persisted last-commanded position and manual override from storage."""
         data = await self._store.async_load()
-        if data and "last_commanded" in data:
+        if not data:
+            return
+        if data.get("last_commanded") is not None:
             self._last_commanded = float(data["last_commanded"])
+        if data.get("manual_position") is not None:
+            self._manual_position = float(data["manual_position"])
+        until_raw = data.get("manual_override_until")
+        if until_raw is not None:
+            until = datetime.fromisoformat(until_raw)
+            # Drop an override that already expired while HA was down -- restoring
+            # a stale hold would needlessly suppress automation after a reboot.
+            if until > datetime.now(tz=UTC):
+                self._manual_override_until = until
+            else:
+                self._manual_position = None
 
     async def _async_update_data(self) -> CoordinatorData:
         now = datetime.now(tz=UTC)
@@ -363,49 +409,63 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # has held continuously for the configured number of minutes. This damps
         # cover oscillation on partly-cloudy or gusty days where sensors flip
         # across a threshold repeatedly.
-        prev_committed = self._last_intent
-        should_commit = self._evaluate_stability(intent, now)
+        #
+        # Serialise the mutate-and-command section: a burst of sensor
+        # state_changed events each schedule a refresh, and interleaving their
+        # mutations of _last_commanded / _pending_since here would corrupt the
+        # stability state machine and re-issue conflicting commands.
+        async with self._update_lock:
+            prev_committed = self._last_intent
+            should_commit = self._evaluate_stability(intent, now)
 
-        if should_commit:
-            intent_changed = intent != prev_committed
-            self._last_intent = intent
-            self._last_computed_position = computed_pos
-            self._last_reason = result.reason
-            self._last_triggers = [t.to_dict() for t in result.triggers]
-            last = self._last_commanded
+            if should_commit:
+                intent_changed = intent != prev_committed
+                self._last_intent = intent
+                self._last_computed_position = computed_pos
+                self._last_reason = result.reason
+                self._last_triggers = [t.to_dict() for t in result.triggers]
+                last = self._last_commanded
 
-            # Resolve the target position for this intent. During a manual
-            # override the user owns the position: the target is their remembered
-            # manual setting, re-asserted only if it has drifted (e.g. a transient
-            # weather retraction earlier in the override window moved the cover
-            # off the manual position). We never drive to the inactive rest
-            # position while an override holds.
-            if intent == Intent.MANUAL_OVERRIDE:
-                target = self._manual_position
-                needs_command = (
-                    target is not None
-                    and last is not None
-                    and abs(target - last) >= hysteresis
-                )
-            else:
-                target = clamped
-                delta = abs(clamped - last) if last is not None else None
-                needs_command = delta is None or delta >= hysteresis or intent_changed
+                # Resolve the target position for this intent. During a manual
+                # override the user owns the position: the target is their
+                # remembered manual setting, re-asserted only if it has drifted
+                # (e.g. a transient weather retraction earlier in the override
+                # window moved the cover off the manual position). We never drive
+                # to the inactive rest position while an override holds.
+                if intent == Intent.MANUAL_OVERRIDE:
+                    target = self._manual_position
+                    needs_command = (
+                        target is not None
+                        and last is not None
+                        and abs(target - last) >= hysteresis
+                    )
+                else:
+                    target = clamped
+                    delta = abs(clamped - last) if last is not None else None
+                    needs_command = (
+                        delta is None or delta >= hysteresis or intent_changed
+                    )
 
-            # Suppressing commands below the horizon prevents an HA restart at
-            # night from re-opening covers the user closed manually. A manual
-            # override is exempt: restoring the user's explicit position (e.g.
-            # after a transient weather retraction cleared) must work regardless
-            # of the sun, and it only fires when the position has actually drifted.
-            above_horizon = sol_el > 0
-            allow_command = above_horizon or intent == Intent.MANUAL_OVERRIDE
-            if self._enabled and allow_command and target is not None and needs_command:
-                # Only record the new position when the command actually
-                # succeeded. Recording a failed move as committed would let
-                # hysteresis suppress every retry, stranding the cover.
-                if await self._command_covers(target):
-                    self._last_commanded = target
-                    await self._store.async_save({"last_commanded": target})
+                # Suppressing commands below the horizon prevents an HA restart
+                # at night from re-opening covers the user closed manually. A
+                # manual override is exempt: restoring the user's explicit
+                # position (e.g. after a transient weather retraction cleared)
+                # must work regardless of the sun, and it only fires when the
+                # position has actually drifted.
+                above_horizon = sol_el > 0
+                allow_command = above_horizon or intent == Intent.MANUAL_OVERRIDE
+                if (
+                    self._enabled
+                    and allow_command
+                    and target is not None
+                    and needs_command
+                ):
+                    # Only record the new position when the command actually
+                    # succeeded. Recording a failed move as committed would let
+                    # hysteresis suppress every retry, stranding the cover.
+                    if await self._command_covers(target):
+                        self._last_commanded = target
+                        await self._store.async_save(self._store_payload())
 
         # Expose the last committed intent/position/reason -- a pending candidate
         # that has not held long enough is internal state only. The reason must
@@ -479,6 +539,14 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         Mutates ``_pending_intent`` / ``_pending_since`` as a side effect.
         """
         if new_intent == self._last_intent:
+            self._pending_intent = None
+            self._pending_since = None
+            return True
+
+        # Safety wins immediately: a transition into the weather-retract intent
+        # must never wait out the stability window. Holding a genuine high-wind
+        # or rain retraction would defeat the protection the gate exists for.
+        if new_intent == Intent.INACTIVE_WEATHER:
             self._pending_intent = None
             self._pending_since = None
             return True
@@ -573,13 +641,16 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             data = {ATTR_ENTITY_ID: entities, "position": round(position)}
         # Stamp the command time before the call so the 30-second echo debounce
         # in _handle_cover_state_change covers the resulting state change even if
-        # the service call is slow or raises.
+        # the service call is slow. If the call fails, clear the stamp again: a
+        # failed command produces no echo, so leaving the debounce window open
+        # would swallow a real manual move toward the failed target.
         self._last_command_time = datetime.now(tz=UTC)
         try:
             await self.hass.services.async_call(
                 _COVER_DOMAIN, service, data, blocking=True
             )
         except HomeAssistantError as err:
+            self._last_command_time = None
             _LOGGER.warning(
                 "Failed to command covers %s to %d%%: %s",
                 entities,
@@ -665,33 +736,43 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         except (TypeError, ValueError):
             return
 
-        last = self._last_commanded
-        if last is None:
-            return
-
         hysteresis = float(
             self._zone.get(
                 CONF_HYSTERESIS,
                 self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
             )
         )
-        delta = abs(new_pos - last)
-        if delta < hysteresis:
-            return
-
-        # Debounce: suppress echoes of a coordinator command that arrive shortly
-        # after the command. Only suppress when the delta is also within a
-        # coasting margin (2 × hysteresis) -- motor coasting a few percent past
-        # the target is still an echo. A move well outside that margin is a
-        # genuine immediate countermand and must set an override right away.
         now = datetime.now(tz=UTC)
         elapsed = (
             (now - self._last_command_time).total_seconds()
             if self._last_command_time is not None
             else None
         )
-        if elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS and delta < hysteresis * 2:
-            return
+        in_debounce = elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS
+
+        last = self._last_commanded
+        if last is None:
+            # No baseline yet (e.g. HA restarted at night with the sun below the
+            # threshold all morning, so the coordinator never commanded a
+            # position). A genuine external move still deserves an override --
+            # dropping it would silently ignore the user's remote. The only
+            # echo we could see here is one inside the post-command debounce
+            # window, so suppress that and adopt anything else.
+            if in_debounce:
+                return
+        else:
+            delta = abs(new_pos - last)
+            if delta < hysteresis:
+                return
+
+            # Debounce: suppress echoes of a coordinator command that arrive
+            # shortly after the command. Only suppress when the delta is also
+            # within a coasting margin (2 × hysteresis) -- a motor coasting a few
+            # percent past the target is still an echo. A move well outside that
+            # margin is a genuine immediate countermand and must set an override
+            # right away.
+            if in_debounce and delta < hysteresis * 2:
+                return
 
         # External move confirmed -- set a manual override and remember the
         # position the user chose, so it can be restored if a transient weather
@@ -701,7 +782,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._manual_position = new_pos
         self._clear_pending()
         self._last_commanded = new_pos
-        self.hass.async_create_task(self._store.async_save({"last_commanded": new_pos}))
+        self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
 
     def reset_timers(self) -> None:

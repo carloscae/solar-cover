@@ -27,9 +27,11 @@ class TestVerticalPosition:
         # blind_height = tan(15 deg) ~= 0.268m -> 10.7%
         assert abs(result - 10.7) < 0.5
 
-    def test_gamma_near_90_returns_100(self) -> None:
-        # gamma=89 deg -- sun nearly at edge of FOV, cos(89 deg) is very small
-        # -> clip to h_win -> 100%
+    def test_gamma_near_90_retracts(self) -> None:
+        # gamma=89 deg -- sun nearly at edge of FOV. cos(89 deg) is tiny but still
+        # positive, so the formula runs: (distance / cos_gamma) * tan(elev) is huge
+        # and clips to h_win -> 100%. Just inside 90 deg there is still direct sun
+        # to block, so full deployment is correct here.
         result = vertical_position(
             sol_elev_deg=30.0, gamma_deg=89.0, distance=1.0, h_win=2.0
         )
@@ -42,12 +44,15 @@ class TestVerticalPosition:
         )
         assert 0.0 <= result <= 100.0
 
-    def test_gamma_above_90_returns_100(self) -> None:
-        # gamma > 90 deg triggers the cos_gamma <= 0 guard directly
+    def test_gamma_above_90_retracts(self) -> None:
+        # gamma > 90 deg triggers the cos_gamma <= 0 branch: the sun is behind the
+        # window plane, so there is no direct sun on the glass to block. The blind
+        # retracts (0.0), matching the horizontal twin's oblique-sun behavior. This
+        # is a deliberate product-behavior change from the old 100.0.
         result = vertical_position(
             sol_elev_deg=30.0, gamma_deg=91.0, distance=1.0, h_win=2.0
         )
-        assert result == 100.0
+        assert result == 0.0
 
 
 class TestHorizontalPosition:
@@ -107,6 +112,31 @@ class TestHorizontalPosition:
             distance=5.0,
         )
         assert 0.0 <= result <= 100.0
+
+    def test_zero_awn_length_is_total(self) -> None:
+        # Degenerate denominator: awn_length == 0 would divide by zero in
+        # length / awn_length. The guard returns 0.0 instead of raising.
+        result = horizontal_position(
+            sol_elev_deg=30.0,
+            gamma_deg=0.0,
+            h_win=2.5,
+            awn_length=0.0,
+            awn_angle_deg=15.0,
+            distance=0.5,
+        )
+        assert result == 0.0
+
+    def test_zero_h_win_is_total(self) -> None:
+        # Degenerate input: h_win == 0 collapses the formula. Guard returns 0.0.
+        result = horizontal_position(
+            sol_elev_deg=30.0,
+            gamma_deg=0.0,
+            h_win=0.0,
+            awn_length=3.0,
+            awn_angle_deg=15.0,
+            distance=0.5,
+        )
+        assert result == 0.0
 
     def test_zero_c_angle_returns_0(self) -> None:
         # sol_elev=0 + awn_angle=0 -> c_angle=0 -> sin(c_angle)=0.0 -> return 0.0
@@ -189,6 +219,19 @@ class TestTiltPosition:
             bidirectional=False,
         )
         assert 0.0 <= result <= 100.0
+
+    def test_zero_slat_width_returns_100(self) -> None:
+        # Degenerate denominator: slat_width_mm == 0 would divide by zero in
+        # slat_spacing_mm / slat_width_mm. The guard returns 100.0 (fully closed),
+        # the same safe fallback as the negative-discriminant case.
+        result = tilt_position(
+            sol_elev_deg=30.0,
+            gamma_deg=0.0,
+            slat_width_mm=0.0,
+            slat_spacing_mm=50.0,
+            bidirectional=False,
+        )
+        assert result == 100.0
 
     def test_gamma_90_returns_100(self) -> None:
         # gamma=90 deg exactly -> cos_gamma ~= 6e-17, abs < 1e-9 guard fires -> 100%

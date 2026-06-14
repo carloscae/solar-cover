@@ -12,7 +12,28 @@ from custom_components.solar_cover.const import (
     ReasonCode,
     TiltRange,
 )
-from custom_components.solar_cover.intent import IntentInput, evaluate_intent
+from custom_components.solar_cover.intent import (
+    IntentInput,
+    _num,
+    _round,
+    evaluate_intent,
+)
+
+
+class TestNumberHelpers:
+    def test_round_to_one_decimal(self) -> None:
+        assert _round(12.53) == pytest.approx(12.5)
+        assert _round(45.0) == pytest.approx(45.0)
+
+    def test_num_drops_trailing_zero(self) -> None:
+        # 45.0 -> '45' so the sentence matches the structured (rounded) field.
+        assert _num(45.0) == "45"
+
+    def test_num_keeps_significant_decimal(self) -> None:
+        assert _num(12.53) == "12.5"
+
+    def test_num_negative(self) -> None:
+        assert _num(-3.0) == "-3"
 
 
 @pytest.fixture

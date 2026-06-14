@@ -195,6 +195,27 @@ class TestCommandFailureHandling:
             assert coord._last_commanded == 50.0
 
     @pytest.mark.asyncio
+    async def test_failed_command_clears_debounce_stamp(self) -> None:
+        # A failed command produces no echo, so its debounce stamp must be
+        # cleared -- otherwise the 30 s window would swallow a real manual move
+        # toward the failed target.
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock(
+            side_effect=HomeAssistantError("offline")
+        )
+        ok = await coord._command_covers(50.0)
+        assert ok is False
+        assert coord._last_command_time is None
+
+    @pytest.mark.asyncio
+    async def test_successful_command_stamps_debounce(self) -> None:
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock()
+        ok = await coord._command_covers(50.0)
+        assert ok is True
+        assert coord._last_command_time is not None
+
+    @pytest.mark.asyncio
     async def test_override_restore_works_below_horizon(self) -> None:
         # The user's explicit manual position must be restorable even at night;
         # the below-horizon command suppression applies to automatic intents only.

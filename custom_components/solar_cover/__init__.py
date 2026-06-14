@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,8 @@ from .const import (
 from .coordinator import SolarCoverConfigEntry, SolarCoverCoordinator
 from .solar import SolarEngine
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS_ZONE = ["button", "sensor", "switch"]
 
 # m/s -> km/h. v1 stored wind_threshold under an m/s UI label; v2 makes km/h the
@@ -26,7 +29,16 @@ _MS_TO_KMH = 3.6
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate an old config entry to the current schema version."""
     if entry.version > 2:
-        # Downgrade from a newer schema is not supported.
+        # Downgrade from a newer schema is not supported: a future version may
+        # store keys this code does not understand, so refuse rather than risk
+        # corrupting them.
+        _LOGGER.error(
+            "Cannot downgrade Solar Cover config entry %s from schema version %s "
+            "to 2; this version of the integration does not support that schema. "
+            "Upgrade the integration again or remove and re-add the entry.",
+            entry.entry_id,
+            entry.version,
+        )
         return False
 
     if entry.version < 2:
@@ -131,4 +143,12 @@ async def _async_update_integration_listener(
     await hass.config_entries.async_reload(entry.entry_id)
     for zone_entry in hass.config_entries.async_entries(DOMAIN):
         if zone_entry.data.get("entry_type", ENTRY_TYPE_ZONE) == ENTRY_TYPE_ZONE:
-            await hass.config_entries.async_reload(zone_entry.entry_id)
+            try:
+                await hass.config_entries.async_reload(zone_entry.entry_id)
+            except Exception:  # noqa: BLE001 -- resilience: one bad zone must not
+                # strand every other zone on stale global settings. Log and move on.
+                _LOGGER.exception(
+                    "Failed to reload zone entry %s after a global settings change; "
+                    "continuing with the remaining zones",
+                    zone_entry.entry_id,
+                )

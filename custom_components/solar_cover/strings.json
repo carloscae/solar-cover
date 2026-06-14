@@ -87,7 +87,8 @@
     "error": {
       "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
       "min_exceeds_max": "Minimum shading position must not exceed the maximum.",
-      "unknown": "Unexpected error. Check the logs."
+      "unknown": "Unexpected error. Check the logs.",
+      "fov_out_of_range": "Field of view must be 1-90 deg for vertical and tilt covers (up to 180 deg for horizontal awnings)."
     }
   },
   "options": {
@@ -192,7 +193,8 @@
     "error": {
       "spacing_exceeds_width": "Slat spacing must not exceed the slat width.",
       "min_exceeds_max": "Minimum shading position must not exceed the maximum.",
-      "unknown": "Unexpected error. Check the logs."
+      "unknown": "Unexpected error. Check the logs.",
+      "fov_out_of_range": "Field of view must be 1-90 deg for vertical and tilt covers (up to 180 deg for horizontal awnings)."
     }
   },
   "entity": {
@@ -218,15 +220,36 @@
           "manual_override": "Manual override"
         }
       },
-      "reason": { "name": "Reason" },
-      "sun_elevation": { "name": "Sun elevation" },
-      "sun_azimuth": { "name": "Sun azimuth" },
-      "surface_azimuth": { "name": "Sun angle to window" },
-      "computed_position": { "name": "Calculated position" },
-      "fov_entry": { "name": "Sun enters window" },
-      "fov_exit": { "name": "Sun leaves window" },
-      "stability_pending_until": { "name": "Pending change commits" },
-      "manual_override_until": { "name": "Manual hold expires" }
+      "reason": {
+        "name": "Reason"
+      },
+      "sun_elevation": {
+        "name": "Sun elevation"
+      },
+      "sun_azimuth": {
+        "name": "Sun azimuth"
+      },
+      "surface_azimuth": {
+        "name": "Sun angle to window"
+      },
+      "computed_position": {
+        "name": "Calculated position"
+      },
+      "commanded_position": {
+        "name": "Commanded position"
+      },
+      "fov_entry": {
+        "name": "Sun enters window"
+      },
+      "fov_exit": {
+        "name": "Sun leaves window"
+      },
+      "stability_pending_until": {
+        "name": "Pending change commits"
+      },
+      "manual_override_until": {
+        "name": "Manual hold expires"
+      }
     }
   }
 }
