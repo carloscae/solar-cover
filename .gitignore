@@ -31,3 +31,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Local MCP config (contains private URLs/tokens)
+.mcp.json
