@@ -197,7 +197,8 @@ class TestResetTimers:
     def test_reset_timers_triggers_refresh(self) -> None:
         coord = _make_coordinator()
         coord.reset_timers()
-        coord.hass.async_create_task.assert_called_once()
+        # reset_timers schedules two tasks: store save + coordinator refresh
+        assert coord.hass.async_create_task.call_count == 2
 
     def test_reset_timers_bypasses_stability_hold(self) -> None:
         # With a delay configured and SHADING committed, a worsening candidate

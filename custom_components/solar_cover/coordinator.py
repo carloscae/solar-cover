@@ -460,12 +460,19 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     and target is not None
                     and needs_command
                 ):
-                    # Only record the new position when the command actually
-                    # succeeded. Recording a failed move as committed would let
-                    # hysteresis suppress every retry, stranding the cover.
+                    # Optimistically record the new target BEFORE awaiting the
+                    # service call. _handle_cover_state_change can fire during
+                    # that await (some integrations reflect position immediately)
+                    # and would compute delta against the stale old value,
+                    # triggering a false manual override. With the target already
+                    # committed, any in-flight state change sees delta ≈ 0 and
+                    # is suppressed by the debounce window.
+                    prev_commanded = self._last_commanded
+                    self._last_commanded = target
                     if await self._command_covers(target):
-                        self._last_commanded = target
                         await self._store.async_save(self._store_payload())
+                    else:
+                        self._last_commanded = prev_commanded  # revert on failure
 
         # Expose the last committed intent/position/reason -- a pending candidate
         # that has not held long enough is internal state only. The reason must
@@ -664,6 +671,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._manual_override_until = None
         self._manual_position = None
         self._clear_pending()
+        self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
 
     def async_setup_cover_listeners(self) -> None:
@@ -716,9 +724,27 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if not self._enabled:
             return
 
-        # Skip while the cover is still travelling to a commanded position.
         attrs = new_state.attributes
+
+        # Compute debounce state before the is_opening/is_closing check so we
+        # can extend the window while the cover is still travelling.
+        now = datetime.now(tz=UTC)
+        elapsed = (
+            (now - self._last_command_time).total_seconds()
+            if self._last_command_time is not None
+            else None
+        )
+        in_debounce = elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS
+
+        # Skip while the cover is still travelling to a commanded position.
+        # If we are inside the debounce window, reset _last_command_time to now
+        # so the 30-second window restarts from the last travelling report rather
+        # than from when the command was sent. Slow motors (some shutters take
+        # 40-60 s) would otherwise exit the debounce window before settling,
+        # causing the final stopped state-change to be mis-read as a manual move.
         if attrs.get("is_opening") or attrs.get("is_closing"):
+            if in_debounce:
+                self._last_command_time = now
             return
 
         # Read the axis this zone actually drives: slat tilt for venetian
@@ -742,13 +768,6 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
             )
         )
-        now = datetime.now(tz=UTC)
-        elapsed = (
-            (now - self._last_command_time).total_seconds()
-            if self._last_command_time is not None
-            else None
-        )
-        in_debounce = elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS
 
         last = self._last_commanded
         if last is None:
@@ -801,6 +820,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._last_intent = None
         self._manual_override_until = None
         self._manual_position = None
+        self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
 
 
