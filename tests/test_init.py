@@ -318,3 +318,143 @@ class TestStaleCoverCleanup:
             )
             is None
         )
+
+    async def test_all_covers_dropped_keeps_zone_device(
+        self, hass: HomeAssistant
+    ) -> None:
+        from homeassistant.helpers import device_registry as dr
+
+        from custom_components.solar_cover.coordinator import cover_slug
+
+        _integration_entry(hass)
+        zone = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "South",
+                "cover_type": "vertical",
+                "azimuth": 180,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": ["cover.a"],
+                "window_height": 2.5,
+                "glare_depth": 1.0,
+            },
+            title="Zone: South",
+        )
+        zone.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(zone.entry_id)
+        await hass.async_block_till_done()
+
+        dev_reg = dr.async_get(hass)
+        # Per-cover device exists after first setup.
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
+            )
+            is not None
+        )
+
+        # Drop all covers from the zone and reload.
+        hass.config_entries.async_update_entry(
+            zone, data={**zone.data, "cover_entities": []}
+        )
+        await hass.async_block_till_done()
+
+        # Per-cover device is gone.
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
+            )
+            is None
+        )
+        # Zone device still exists.
+        assert (
+            dev_reg.async_get_device(identifiers={(DOMAIN, zone.entry_id)}) is not None
+        )
+
+    async def test_cleanup_does_not_touch_other_zones_devices(
+        self, hass: HomeAssistant
+    ) -> None:
+        from homeassistant.helpers import device_registry as dr
+
+        from custom_components.solar_cover.coordinator import cover_slug
+
+        _integration_entry(hass)
+        zone_a = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "ZoneA",
+                "cover_type": "vertical",
+                "azimuth": 180,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": ["cover.a"],
+                "window_height": 2.5,
+                "glare_depth": 1.0,
+            },
+            title="Zone: ZoneA",
+        )
+        zone_b = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "ZoneB",
+                "cover_type": "vertical",
+                "azimuth": 270,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": ["cover.b"],
+                "window_height": 2.5,
+                "glare_depth": 1.0,
+            },
+            title="Zone: ZoneB",
+        )
+        zone_a.add_to_hass(hass)
+        zone_b.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(zone_a.entry_id)
+        await hass.async_block_till_done()
+        # Zone B may auto-load when zone A is set up; only setup if not loaded.
+        if zone_b.state.value == "not_loaded":
+            assert await hass.config_entries.async_setup(zone_b.entry_id)
+        await hass.async_block_till_done()
+
+        dev_reg = dr.async_get(hass)
+        # Both per-cover devices exist.
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone_a.entry_id}_{cover_slug('cover.a')}")}
+            )
+            is not None
+        )
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone_b.entry_id}_{cover_slug('cover.b')}")}
+            )
+            is not None
+        )
+
+        # Drop all covers from zone_a only.
+        hass.config_entries.async_update_entry(
+            zone_a, data={**zone_a.data, "cover_entities": []}
+        )
+        await hass.async_block_till_done()
+
+        # Zone A's per-cover device is gone.
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone_a.entry_id}_{cover_slug('cover.a')}")}
+            )
+            is None
+        )
+        # Zone B's per-cover device is untouched.
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone_b.entry_id}_{cover_slug('cover.b')}")}
+            )
+            is not None
+        )
