@@ -170,6 +170,46 @@ class TestMultiAwaitRace:
         assert coord._manual_position["cover.b"] == pytest.approx(5.0)
         assert coord._last_commanded["cover.b"] == pytest.approx(5.0)
 
+    @pytest.mark.asyncio
+    async def test_stale_group_skips_covers_with_new_override(self) -> None:
+        # Same race as above, but this asserts the PHYSICAL send is also
+        # protected: cover.b's own group (target 90) must never be sent once
+        # a fresh override armed on it during group 1's await, since sending
+        # it would drive the physical cover back to a stale, pre-move target
+        # and silently undo the manual move the user just made.
+        coord = _make_coordinator(covers=["cover.a", "cover.b"])
+        coord._last_commanded = {"cover.a": 50.0, "cover.b": 50.0}
+
+        def _event(entity_id: str, position: float) -> MagicMock:
+            state = MagicMock()
+            state.state = "open"
+            state.attributes = {"current_position": position}
+            event = MagicMock()
+            event.data = {"entity_id": entity_id, "new_state": state}
+            return event
+
+        async def fake_call(
+            domain: str, service: str, data: dict, blocking: bool
+        ) -> None:
+            if "cover.a" in data[ATTR_ENTITY_ID]:
+                # Manual countermand of cover.b lands during cover.a's await.
+                coord._handle_cover_state_change(_event("cover.b", 5.0))
+
+        coord.hass.services.async_call = AsyncMock(side_effect=fake_call)
+
+        await coord._command_covers({"cover.a": 80.0, "cover.b": 90.0})
+
+        # Only cover.a's group was ever physically sent; cover.b's own group
+        # (target 90) was dropped entirely because its override changed.
+        assert coord.hass.services.async_call.await_count == 1
+        sent_entities = coord.hass.services.async_call.call_args.args[2][ATTR_ENTITY_ID]
+        assert "cover.b" not in sent_entities
+
+        # Bookkeeping still reflects the real, just-armed manual position.
+        assert coord._manual_override_until["cover.b"] is not None
+        assert coord._manual_position["cover.b"] == pytest.approx(5.0)
+        assert coord._last_commanded["cover.b"] == pytest.approx(5.0)
+
 
 class TestManualPositionRestore:
     """Bug B, now per cover -- weather retraction mid-override must not erase the

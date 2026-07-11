@@ -703,11 +703,23 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         ``_last_command_time`` for EVERY entity up front, before the first
         group's await, so a genuine manual move landing during an earlier
         group's await is not silently overwritten when a later group is sent.
+
+        A snapshot of each entity's ``_manual_override_until`` is also taken up
+        front. If an entity's override changes between the snapshot and its
+        own group being sent -- i.e. a genuine external move armed a NEW
+        override on it while an earlier group was still awaiting its service
+        call -- that entity is dropped from its group's physical command. The
+        bookkeeping fix above protects the coordinator's recorded state; this
+        protects the physical device from being sent back to a stale,
+        pre-move target and silently undoing what the user just did.
         """
         if not targets:
             return set()
 
         now = datetime.now(tz=UTC)
+        override_snapshot: dict[str, datetime | None] = {
+            eid: self._manual_override_until.get(eid) for eid in targets
+        }
         prev_commanded: dict[str, float | None] = {}
         for eid, target in targets.items():
             prev_commanded[eid] = self._last_commanded.get(eid)
@@ -726,23 +738,30 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         failed: set[str] = set()
         for rounded, eids in groups.items():
-            data = {ATTR_ENTITY_ID: eids, pos_key: rounded}
+            live_eids = [
+                eid
+                for eid in eids
+                if self._manual_override_until.get(eid) == override_snapshot[eid]
+            ]
+            if not live_eids:
+                continue
+            data = {ATTR_ENTITY_ID: live_eids, pos_key: rounded}
             try:
                 await self.hass.services.async_call(
                     _COVER_DOMAIN, service, data, blocking=True
                 )
             except HomeAssistantError as err:
                 _LOGGER.warning(
-                    "Failed to command covers %s to %d%%: %s", eids, rounded, err
+                    "Failed to command covers %s to %d%%: %s", live_eids, rounded, err
                 )
-                for eid in eids:
+                for eid in live_eids:
                     prev = prev_commanded[eid]
                     if prev is None:
                         self._last_commanded.pop(eid, None)
                     else:
                         self._last_commanded[eid] = prev
                     self._last_command_time.pop(eid, None)
-                failed.update(eids)
+                failed.update(live_eids)
         return failed
 
     def clear_manual_override(self) -> None:
