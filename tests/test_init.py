@@ -263,3 +263,58 @@ class TestMigration:
             assert await async_migrate_entry(hass, entry) is False
         assert "downgrade" in caplog.text.lower()
         assert entry.entry_id in caplog.text
+
+
+class TestStaleCoverCleanup:
+    async def test_dropped_cover_device_removed_on_reload(
+        self, hass: HomeAssistant
+    ) -> None:
+        from homeassistant.helpers import device_registry as dr
+
+        from custom_components.solar_cover.coordinator import cover_slug
+
+        _integration_entry(hass)
+        zone = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "South",
+                "cover_type": "vertical",
+                "azimuth": 180,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": ["cover.a", "cover.b"],
+                "window_height": 2.5,
+                "glare_depth": 1.0,
+            },
+            title="Zone: South",
+        )
+        zone.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(zone.entry_id)
+        await hass.async_block_till_done()
+
+        dev_reg = dr.async_get(hass)
+        # Both per-cover devices exist after first setup.
+        for eid in ("cover.a", "cover.b"):
+            ident = (DOMAIN, f"{zone.entry_id}_{cover_slug(eid)}")
+            assert dev_reg.async_get_device(identifiers={ident}) is not None
+
+        # Drop cover.b from the zone and reload.
+        hass.config_entries.async_update_entry(
+            zone, data={**zone.data, "cover_entities": ["cover.a"]}
+        )
+        await hass.async_block_till_done()
+
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
+            )
+            is not None
+        )
+        assert (
+            dev_reg.async_get_device(
+                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.b')}")}
+            )
+            is None
+        )

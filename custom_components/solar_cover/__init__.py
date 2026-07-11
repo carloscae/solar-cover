@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_WIND_THRESHOLD,
@@ -14,7 +15,11 @@ from .const import (
     ENTRY_TYPE_INTEGRATION,
     ENTRY_TYPE_ZONE,
 )
-from .coordinator import SolarCoverConfigEntry, SolarCoverCoordinator
+from .coordinator import (
+    SolarCoverConfigEntry,
+    SolarCoverCoordinator,
+    cover_slug,
+)
 from .solar import SolarEngine
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +76,28 @@ def _integration_data(hass: HomeAssistant) -> dict[str, Any]:
     return {}
 
 
+def _async_cleanup_stale_cover_devices(
+    hass: HomeAssistant, entry: ConfigEntry, cover_entities: list[str]
+) -> None:
+    """Remove per-cover devices for covers no longer in ``cover_entities``.
+
+    HA does not auto-remove devices when a config list shrinks. Per-cover device
+    identifiers are ``(DOMAIN, f"{entry_id}_{slug}")``; the zone device is
+    ``(DOMAIN, entry_id)``. Removing a device cascades to its entities.
+    """
+    dev_reg = dr.async_get(hass)
+    zone_identifier = entry.entry_id
+    expected = {f"{entry.entry_id}_{cover_slug(eid)}" for eid in cover_entities}
+    prefix = f"{entry.entry_id}_"
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        for domain, identifier in device.identifiers:
+            if domain != DOMAIN or identifier == zone_identifier:
+                continue
+            if identifier.startswith(prefix) and identifier not in expected:
+                dev_reg.async_remove_device(device.id)
+                break
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_type = entry.data.get("entry_type", ENTRY_TYPE_ZONE)
 
@@ -109,6 +136,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ZONE)
+    _async_cleanup_stale_cover_devices(
+        hass, entry, list(zone_data.get("cover_entities", []))
+    )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
