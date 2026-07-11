@@ -34,3 +34,6 @@ htmlcov/
 
 # Local MCP config (contains private URLs/tokens)
 .mcp.json
+
+# Local worktrees (superpowers subagent-driven-development)
+.worktrees/
