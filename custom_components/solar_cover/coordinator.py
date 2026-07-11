@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -127,6 +128,36 @@ def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
     )
 
 
+@dataclass(frozen=True, kw_only=True)
+class CoverSnapshot:
+    """Per-cover slice of the coordinator snapshot, one per configured cover."""
+
+    commanded_position: float
+    manual_override_until: str | None
+    intent: Intent
+
+
+class _SolarCoverStore(Store[dict[str, Any]]):
+    """Persisted per-cover override state for a zone (schema version 2).
+
+    v1 stored a single zone-wide scalar override that was never tied to a
+    specific entity_id, so it cannot be reattached in a multi-cover zone. Any
+    pre-v2 payload migrates to no active overrides -- this is transient runtime
+    state, not user configuration.
+    """
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Migrate an older stored payload to the current per-cover shape."""
+        if old_major_version < 2:
+            return {"covers": {}}
+        return old_data
+
+
 class CoordinatorData:
     """Snapshot of coordinator state, shared with entities as attributes."""
 
@@ -146,6 +177,7 @@ class CoordinatorData:
         stability_pending_until: str | None,
         pending_intent: str | None,
         manual_override_until: str | None,
+        covers: dict[str, CoverSnapshot] | None = None,
     ) -> None:
         self.intent = intent
         self.computed_position = computed_position
@@ -161,6 +193,7 @@ class CoordinatorData:
         self.stability_pending_until = stability_pending_until
         self.pending_intent = pending_intent
         self.manual_override_until = manual_override_until
+        self.covers = covers if covers is not None else {}
 
 
 class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -185,7 +218,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._zone = zone_data
         self._integration = integration_data
         self._solar = solar_engine
-        self._last_commanded: float | None = None
+        # Override-related state is per cover, keyed by cover entity_id. Shared
+        # automatic intent and the stability clock stay zone-level below.
+        self._last_commanded: dict[str, float] = {}
         self._last_intent: Intent | None = None
         self._last_computed_position: float | None = None
         self._last_reason: str = ""
@@ -193,14 +228,18 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._pending_intent: Intent | None = None
         self._pending_since: datetime | None = None
         self._enabled: bool = True
-        self._manual_override_until: datetime | None = None
-        # The user's manual target, remembered so it can be restored if a
-        # transient weather retraction overwrites _last_commanded mid-override.
-        self._manual_position: float | None = None
+        self._manual_override_until: dict[str, datetime] = {}
+        # The user's manual target per cover, remembered so it can be restored
+        # if a transient weather retraction overwrites _last_commanded mid-hold.
+        self._manual_position: dict[str, float] = {}
         self._unsub_sensors: Any = None
         self._unsub_covers: Any = None
-        self._last_command_time: datetime | None = None
-        self._store: Store[dict[str, Any]] = Store(hass, 1, f"solar_cover.{entry_id}")
+        # Per cover: answers "did we recently command THIS cover?" A shared stamp
+        # would open a false debounce window on an uncommanded sibling.
+        self._last_command_time: dict[str, datetime] = {}
+        self._store: Store[dict[str, Any]] = _SolarCoverStore(
+            hass, 2, f"solar_cover.{entry_id}"
+        )
         # Serialises the mutate-and-command section of _async_update_data so a
         # burst of sensor state_changed events (each scheduling a refresh) cannot
         # interleave mutations of _last_commanded / _pending_since.
@@ -245,6 +284,21 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Return whether automation is active for this zone."""
         return self._enabled
 
+    @property
+    def cover_entities(self) -> list[str]:
+        """The configured physical cover entity_ids for this zone."""
+        return list(self._zone.get(CONF_COVER_ENTITIES, []))
+
+    def _hysteresis(self) -> float:
+        """Resolve the effective hysteresis (zone override, else global, else
+        default)."""
+        return float(
+            self._zone.get(
+                CONF_HYSTERESIS,
+                self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
+            )
+        )
+
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable automation. Triggers an immediate coordinator refresh."""
         self._enabled = enabled
@@ -268,41 +322,54 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._pending_since = None
 
     def _store_payload(self) -> dict[str, Any]:
-        """Build the persisted-state payload.
+        """Build the persisted per-cover state payload.
 
-        ``last_commanded`` survives a restart so a night-time reboot does not
-        re-open a manually-closed cover. ``manual_position`` and
-        ``manual_override_until`` survive too, so a restart mid-override does not
-        silently drop the user's manual hold.
+        Each configured cover's ``last_commanded`` survives a restart so a
+        night-time reboot does not re-open a manually-closed cover;
+        ``manual_position``/``manual_override_until`` survive so a restart
+        mid-hold does not silently drop the user's manual hold.
         """
-        return {
-            "last_commanded": self._last_commanded,
-            "manual_position": self._manual_position,
-            "manual_override_until": (
-                self._manual_override_until.isoformat()
-                if self._manual_override_until is not None
-                else None
-            ),
-        }
+        covers: dict[str, Any] = {}
+        for eid in self.cover_entities:
+            until = self._manual_override_until.get(eid)
+            covers[eid] = {
+                "last_commanded": self._last_commanded.get(eid),
+                "manual_position": self._manual_position.get(eid),
+                "manual_override_until": (
+                    until.isoformat() if until is not None else None
+                ),
+            }
+        return {"covers": covers}
 
     async def async_restore_state(self) -> None:
-        """Load persisted last-commanded position and manual override from storage."""
+        """Load persisted per-cover state; prune keys no longer configured."""
         data = await self._store.async_load()
         if not data:
             return
-        if data.get("last_commanded") is not None:
-            self._last_commanded = float(data["last_commanded"])
-        if data.get("manual_position") is not None:
-            self._manual_position = float(data["manual_position"])
-        until_raw = data.get("manual_override_until")
-        if until_raw is not None:
-            until = datetime.fromisoformat(until_raw)
-            # Drop an override that already expired while HA was down -- restoring
-            # a stale hold would needlessly suppress automation after a reboot.
-            if until > datetime.now(tz=UTC):
-                self._manual_override_until = until
-            else:
-                self._manual_position = None
+        stored = data.get("covers", {})
+        configured = set(self.cover_entities)
+        now = datetime.now(tz=UTC)
+        pruned = False
+        for eid, cover in stored.items():
+            if eid not in configured:
+                # A cover dropped from cover_entities: do not rehydrate it, and
+                # re-save below so the stale key does not linger forever.
+                pruned = True
+                continue
+            last = cover.get("last_commanded")
+            if last is not None:
+                self._last_commanded[eid] = float(last)
+            until_raw = cover.get("manual_override_until")
+            if until_raw is not None:
+                until = datetime.fromisoformat(until_raw)
+                # Drop a hold that already expired while HA was down.
+                if until > now:
+                    self._manual_override_until[eid] = until
+                    manual = cover.get("manual_position")
+                    if manual is not None:
+                        self._manual_position[eid] = float(manual)
+        if pruned:
+            await self._store.async_save(self._store_payload())
 
     async def _async_update_data(self) -> CoordinatorData:
         now = datetime.now(tz=UTC)
@@ -343,6 +410,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         win_az = self._zone[CONF_AZIMUTH]
         gamma = compute_gamma(win_az, sol_az)
 
+        # Always evaluate the PURE automatic intent: pass manual_override_until
+        # =None so intent.py never returns MANUAL_OVERRIDE. Override handling is
+        # entirely in the per-cover resolver below.
         inp = IntentInput(
             sol_elev_deg=sol_el,
             sol_azimuth_deg=sol_az,
@@ -359,7 +429,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             cloud_threshold=self._integration.get(CONF_CLOUD_THRESHOLD),
             radiation=radiation,
             radiation_threshold=self._integration.get(CONF_RADIATION_THRESHOLD),
-            manual_override_until=self._manual_override_until,
+            manual_override_until=None,
             now=now,
             cover_type=CoverType(self._zone[CONF_COVER_TYPE]),
             window_height=self._zone.get(CONF_WINDOW_HEIGHT, 2.5),
@@ -373,127 +443,132 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         result = evaluate_intent(inp)
-        intent = result.intent
+        auto_intent = result.intent
         computed_pos = result.position
 
-        # Resolve final position
         inactive_pos = self._zone.get(
             CONF_INACTIVE_POSITION_OVERRIDE,
             self._integration.get(CONF_INACTIVE_POSITION, DEFAULT_INACTIVE_POSITION),
         )
         raw_position: float = (
             computed_pos
-            if intent == Intent.SHADING and computed_pos is not None
+            if auto_intent == Intent.SHADING and computed_pos is not None
             else float(inactive_pos)
         )
 
-        # Apply min/max clamp -- only when shading; inactive rest position is unclamped
         min_pos = self._zone.get(CONF_MIN_POSITION)
         max_pos = self._zone.get(CONF_MAX_POSITION)
-        clamped: float = raw_position
-        if intent == Intent.SHADING:
+        auto_target: float = raw_position
+        if auto_intent == Intent.SHADING:
             if min_pos is not None:
-                clamped = max(clamped, float(min_pos))
+                auto_target = max(auto_target, float(min_pos))
             if max_pos is not None:
-                clamped = min(clamped, float(max_pos))
+                auto_target = min(auto_target, float(max_pos))
 
-        # Apply hysteresis -- skip only when intent is unchanged AND delta is small
-        hysteresis = float(
-            self._zone.get(
-                CONF_HYSTERESIS,
-                self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
-            )
-        )
+        hysteresis = self._hysteresis()
 
-        # Stability delay: an intent change is only acted on once the new intent
-        # has held continuously for the configured number of minutes. This damps
-        # cover oscillation on partly-cloudy or gusty days where sensors flip
-        # across a threshold repeatedly.
-        #
-        # Serialise the mutate-and-command section: a burst of sensor
-        # state_changed events each schedule a refresh, and interleaving their
-        # mutations of _last_commanded / _pending_since here would corrupt the
-        # stability state machine and re-issue conflicting commands.
         async with self._update_lock:
             prev_committed = self._last_intent
-            should_commit = self._evaluate_stability(intent, now)
-
+            should_commit = self._evaluate_stability(auto_intent, now)
+            intent_changed = auto_intent != prev_committed
             if should_commit:
-                intent_changed = intent != prev_committed
-                self._last_intent = intent
+                self._last_intent = auto_intent
                 self._last_computed_position = computed_pos
                 self._last_reason = result.reason
                 self._last_triggers = [t.to_dict() for t in result.triggers]
-                last = self._last_commanded
 
-                # Resolve the target position for this intent. During a manual
-                # override the user owns the position: the target is their
-                # remembered manual setting, re-asserted only if it has drifted
-                # (e.g. a transient weather retraction earlier in the override
-                # window moved the cover off the manual position). We never drive
-                # to the inactive rest position while an override holds.
-                if intent == Intent.MANUAL_OVERRIDE:
-                    target = self._manual_position
-                    needs_command = (
-                        target is not None
-                        and last is not None
-                        and abs(target - last) >= hysteresis
+            above_horizon = sol_el > 0
+
+            # Per-cover target resolution. Weather safety first (unconditionally),
+            # then an active per-cover hold (restore path), then automatic.
+            targets: dict[str, float] = {}
+            for eid in self.cover_entities:
+                last = self._last_commanded.get(eid)
+                held_until = self._manual_override_until.get(eid)
+                held = held_until is not None and now < held_until
+                if auto_intent == Intent.INACTIVE_WEATHER:
+                    # Retract for safety regardless of the hold; do NOT clear the
+                    # hold -- it resumes once weather clears.
+                    target = auto_target
+                    needs = (
+                        last is None
+                        or abs(target - last) >= hysteresis
+                        or intent_changed
                     )
+                    allow = above_horizon and should_commit
+                elif held:
+                    manual = self._manual_position.get(eid)
+                    if manual is None:
+                        continue
+                    target = manual
+                    # Re-assert only if it drifted (e.g. an earlier weather
+                    # retraction moved this cover off the manual position). The
+                    # restore is exempt from below-horizon and stability gating.
+                    needs = last is not None and abs(manual - last) >= hysteresis
+                    allow = True
                 else:
-                    target = clamped
-                    delta = abs(clamped - last) if last is not None else None
-                    needs_command = (
-                        delta is None or delta >= hysteresis or intent_changed
-                    )
+                    target = auto_target
+                    delta = abs(auto_target - last) if last is not None else None
+                    needs = delta is None or delta >= hysteresis or intent_changed
+                    allow = above_horizon and should_commit
+                if self._enabled and allow and needs:
+                    targets[eid] = target
 
-                # Suppressing commands below the horizon prevents an HA restart
-                # at night from re-opening covers the user closed manually. A
-                # manual override is exempt: restoring the user's explicit
-                # position (e.g. after a transient weather retraction cleared)
-                # must work regardless of the sun, and it only fires when the
-                # position has actually drifted.
-                above_horizon = sol_el > 0
-                allow_command = above_horizon or intent == Intent.MANUAL_OVERRIDE
-                if (
-                    self._enabled
-                    and allow_command
-                    and target is not None
-                    and needs_command
-                ):
-                    # Optimistically record the new target BEFORE awaiting the
-                    # service call. _handle_cover_state_change can fire during
-                    # that await (some integrations reflect position immediately)
-                    # and would compute delta against the stale old value,
-                    # triggering a false manual override. With the target already
-                    # committed, any in-flight state change sees delta ≈ 0 and
-                    # is suppressed by the debounce window.
-                    prev_commanded = self._last_commanded
-                    self._last_commanded = target
-                    if await self._command_covers(target):
-                        await self._store.async_save(self._store_payload())
-                    else:
-                        self._last_commanded = prev_commanded  # revert on failure
+            if targets:
+                failed = await self._command_covers(targets)
+                if len(failed) < len(targets):
+                    await self._store.async_save(self._store_payload())
 
-        # Expose the last committed intent/position/reason -- a pending candidate
-        # that has not held long enough is internal state only. The reason must
-        # track the committed intent so the two never disagree on the panel.
         effective_intent: Intent = (
-            self._last_intent if self._last_intent is not None else intent
+            self._last_intent if self._last_intent is not None else auto_intent
         )
         effective_computed: float | None = (
             computed_pos if should_commit else self._last_computed_position
         )
-        # _last_reason / _last_triggers were already updated to the current
-        # result inside the should_commit block, so they hold the committed
-        # values in both branches -- no need to re-serialise here.
         effective_reason: str = self._last_reason
         effective_triggers: list[dict[str, Any]] = self._last_triggers
-        commanded: float = (
-            self._last_commanded if self._last_commanded is not None else clamped
-        )
 
-        # Timer visibility: when a stability hold is active, surface when the
-        # pending change will commit and what it is; otherwise None.
+        # Zone-level aggregation: report MANUAL_OVERRIDE only when EVERY configured
+        # cover is currently held; otherwise the shared automatic value.
+        configured = self.cover_entities
+        all_held = bool(configured) and all(
+            (self._manual_override_until.get(eid) is not None)
+            and (now < self._manual_override_until[eid])
+            for eid in configured
+        )
+        zone_intent = Intent.MANUAL_OVERRIDE if all_held else effective_intent
+        zone_reason = "Manual override" if all_held else effective_reason
+        zone_triggers: list[dict[str, Any]] = [] if all_held else effective_triggers
+
+        # Per-cover snapshot.
+        covers_snapshot: dict[str, CoverSnapshot] = {}
+        for eid in configured:
+            until = self._manual_override_until.get(eid)
+            held = until is not None and now < until
+            cmd = self._last_commanded.get(eid)
+            covers_snapshot[eid] = CoverSnapshot(
+                commanded_position=cmd if cmd is not None else auto_target,
+                manual_override_until=(
+                    until.isoformat() if held and until is not None else None
+                ),
+                intent=Intent.MANUAL_OVERRIDE if held else effective_intent,
+            )
+
+        # Transitional zone-level commanded_position / manual_override_until,
+        # derived from the first configured cover. Removed in the sensor task
+        # once the sensors read the per-cover snapshot directly.
+        first = configured[0] if configured else None
+        zone_commanded: float = (
+            self._last_commanded.get(first, auto_target)
+            if first is not None
+            else auto_target
+        )
+        zone_manual_until: str | None = None
+        if first is not None:
+            first_until = self._manual_override_until.get(first)
+            if first_until is not None and now < first_until:
+                zone_manual_until = first_until.isoformat()
+
         stability_pending_until: str | None = None
         pending_intent: str | None = None
         if self._pending_since is not None:
@@ -504,16 +579,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 str(self._pending_intent) if self._pending_intent is not None else None
             )
 
-        manual_until = self._manual_override_until
-        manual_override_until: str | None = (
-            manual_until.isoformat()
-            if manual_until is not None and now < manual_until
-            else None
-        )
-
-        # Build hourly curve for entity attribute
         curve = self._solar.hourly_curve(now.date())
-
         entry, exit_ = self._solar.fov_window(
             azimuth_deg=float(win_az),
             fov_left=float(self._zone[CONF_FOV_LEFT]),
@@ -522,20 +588,21 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
 
         return CoordinatorData(
-            intent=effective_intent,
+            intent=zone_intent,
             computed_position=effective_computed,
-            commanded_position=commanded,
+            commanded_position=zone_commanded,
             sun_azimuth=sol_az,
             sun_elevation=sol_el,
             gamma=gamma,
             position_curve=[dict(s) for s in curve],
             fov_entry=entry.isoformat() if entry else None,
             fov_exit=exit_.isoformat() if exit_ else None,
-            reason=effective_reason,
-            reason_detail=effective_triggers,
+            reason=zone_reason,
+            reason_detail=zone_triggers,
             stability_pending_until=stability_pending_until,
             pending_intent=pending_intent,
-            manual_override_until=manual_override_until,
+            manual_override_until=zone_manual_until,
+            covers=covers_snapshot,
         )
 
     def _evaluate_stability(self, new_intent: Intent, now: datetime) -> bool:
@@ -628,48 +695,60 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         """Whether this zone drives venetian slat tilt rather than position."""
         return CoverType(self._zone[CONF_COVER_TYPE]) == CoverType.TILT
 
-    async def _command_covers(self, position: float) -> bool:
-        """Command the zone's covers. Return True on success (or no-op), False if
-        the service call failed -- the caller uses this to decide whether to record
-        the new position as committed."""
-        entities = self._zone.get(CONF_COVER_ENTITIES, [])
-        if not entities:
-            # Observe-only zone: nothing to move, but the computed position is
-            # still the intended one, so treat it as a successful no-op.
-            return True
-        # Venetian blinds expose the slat angle on a separate axis: the geometry
-        # output is a tilt percentage, so it must be sent via set_cover_tilt_position.
-        # Sending it as a position would raise/lower the blind instead of angling it.
-        if self._is_tilt():
-            service = _SERVICE_SET_COVER_TILT_POSITION
-            data = {ATTR_ENTITY_ID: entities, "tilt_position": round(position)}
-        else:
-            service = _SERVICE_SET_COVER_POSITION
-            data = {ATTR_ENTITY_ID: entities, "position": round(position)}
-        # Stamp the command time before the call so the 30-second echo debounce
-        # in _handle_cover_state_change covers the resulting state change even if
-        # the service call is slow. If the call fails, clear the stamp again: a
-        # failed command produces no echo, so leaving the debounce window open
-        # would swallow a real manual move toward the failed target.
-        self._last_command_time = datetime.now(tz=UTC)
-        try:
-            await self.hass.services.async_call(
-                _COVER_DOMAIN, service, data, blocking=True
-            )
-        except HomeAssistantError as err:
-            self._last_command_time = None
-            _LOGGER.warning(
-                "Failed to command covers %s to %d%%: %s",
-                entities,
-                round(position),
-                err,
-            )
-            return False
-        return True
+    async def _command_covers(self, targets: dict[str, float]) -> set[str]:
+        """Command each cover to its target, grouped by rounded position.
+
+        Returns the set of entity_ids whose service call failed (empty on full
+        success or a no-op). Commits ``_last_commanded`` and stamps
+        ``_last_command_time`` for EVERY entity up front, before the first
+        group's await, so a genuine manual move landing during an earlier
+        group's await is not silently overwritten when a later group is sent.
+        """
+        if not targets:
+            return set()
+
+        now = datetime.now(tz=UTC)
+        prev_commanded: dict[str, float | None] = {}
+        for eid, target in targets.items():
+            prev_commanded[eid] = self._last_commanded.get(eid)
+            self._last_commanded[eid] = target
+            self._last_command_time[eid] = now
+
+        groups: dict[int, list[str]] = {}
+        for eid, target in targets.items():
+            groups.setdefault(round(target), []).append(eid)
+
+        is_tilt = self._is_tilt()
+        service = (
+            _SERVICE_SET_COVER_TILT_POSITION if is_tilt else _SERVICE_SET_COVER_POSITION
+        )
+        pos_key = "tilt_position" if is_tilt else "position"
+
+        failed: set[str] = set()
+        for rounded, eids in groups.items():
+            data = {ATTR_ENTITY_ID: eids, pos_key: rounded}
+            try:
+                await self.hass.services.async_call(
+                    _COVER_DOMAIN, service, data, blocking=True
+                )
+            except HomeAssistantError as err:
+                _LOGGER.warning(
+                    "Failed to command covers %s to %d%%: %s", eids, rounded, err
+                )
+                for eid in eids:
+                    prev = prev_commanded[eid]
+                    if prev is None:
+                        self._last_commanded.pop(eid, None)
+                    else:
+                        self._last_commanded[eid] = prev
+                    self._last_command_time.pop(eid, None)
+                failed.update(eids)
+        return failed
 
     def clear_manual_override(self) -> None:
-        self._manual_override_until = None
-        self._manual_position = None
+        """Clear every per-cover manual hold and the zone stability hold."""
+        self._manual_override_until.clear()
+        self._manual_position.clear()
         self._clear_pending()
         self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
@@ -701,59 +780,40 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     @callback
     def _handle_cover_state_change(self, event: Any) -> None:
-        """Detect external cover moves and set a manual override automatically.
+        """Detect an external move of a specific cover and arm its own override.
 
-        Filters out:
-        - Covers that are still travelling (is_opening / is_closing attributes)
-        - Position changes smaller than hysteresis (noise / rounding)
-        - State echoes from coordinator's own commands: changes within the
-          30-second debounce window that are also within a coasting margin
-          (2 × hysteresis) of the commanded position. A large divergence from
-          the commanded position is treated as an immediate manual countermand
-          and sets an override even within the debounce window.
-        - Events while automation is disabled
+        Reads the moved cover from ``event.data['entity_id']`` and keys every
+        piece of state off it, so a move of one cover never perturbs a sibling.
+        Filters out travelling covers, sub-hysteresis noise, own-command echoes
+        (30 s debounce + coasting margin), and events while disabled.
         """
+        eid = event.data.get("entity_id")
+        if eid is None or eid not in self.cover_entities:
+            return
+
         new_state = event.data.get("new_state")
         if new_state is None:
             return
-
-        # Skip unavailable / unknown states -- the position attribute is unreliable.
         if new_state.state in ("unavailable", "unknown"):
             return
-
         if not self._enabled:
             return
 
         attrs = new_state.attributes
 
-        # Compute debounce state before the is_opening/is_closing check so we
-        # can extend the window while the cover is still travelling.
         now = datetime.now(tz=UTC)
-        elapsed = (
-            (now - self._last_command_time).total_seconds()
-            if self._last_command_time is not None
-            else None
-        )
+        stamp = self._last_command_time.get(eid)
+        elapsed = (now - stamp).total_seconds() if stamp is not None else None
         in_debounce = elapsed is not None and elapsed < _COMMAND_DEBOUNCE_SECONDS
 
-        # Skip while the cover is still travelling to a commanded position.
-        # If we are inside the debounce window, reset _last_command_time to now
-        # so the 30-second window restarts from the last travelling report rather
-        # than from when the command was sent. Slow motors (some shutters take
-        # 40-60 s) would otherwise exit the debounce window before settling,
-        # causing the final stopped state-change to be mis-read as a manual move.
-        if attrs.get("is_opening") or attrs.get("is_closing"):
+        # Still travelling: extend only THIS cover's debounce window so a slow
+        # motor's final settle is not mis-read as a manual move.
+        if new_state.state in ("opening", "closing"):
             if in_debounce:
-                self._last_command_time = now
+                self._last_command_time[eid] = now
             return
 
-        # Read the axis this zone actually drives: slat tilt for venetian
-        # blinds, otherwise the cover position.
         pos_attr = "current_tilt_position" if self._is_tilt() else "current_position"
-
-        # Read position before the debounce check so we can distinguish a
-        # genuine echo (position near commanded) from an immediate manual
-        # countermand (position far from commanded).
         raw_pos = attrs.get(pos_attr)
         if raw_pos is None:
             return
@@ -762,64 +822,54 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         except (TypeError, ValueError):
             return
 
-        hysteresis = float(
-            self._zone.get(
-                CONF_HYSTERESIS,
-                self._integration.get(CONF_HYSTERESIS, DEFAULT_HYSTERESIS),
-            )
-        )
-
-        last = self._last_commanded
+        hysteresis = self._hysteresis()
+        last = self._last_commanded.get(eid)
         if last is None:
-            # No baseline yet (e.g. HA restarted at night with the sun below the
-            # threshold all morning, so the coordinator never commanded a
-            # position). A genuine external move still deserves an override --
-            # dropping it would silently ignore the user's remote. The only
-            # echo we could see here is one inside the post-command debounce
-            # window, so suppress that and adopt anything else.
+            # No baseline for this cover: adopt any move outside the debounce.
             if in_debounce:
                 return
         else:
             delta = abs(new_pos - last)
             if delta < hysteresis:
                 return
-
-            # Debounce: suppress echoes of a coordinator command that arrive
-            # shortly after the command. Only suppress when the delta is also
-            # within a coasting margin (2 × hysteresis) -- a motor coasting a few
-            # percent past the target is still an echo. A move well outside that
-            # margin is a genuine immediate countermand and must set an override
-            # right away.
+            # A move well outside the coasting margin is an immediate manual
+            # countermand and arms even inside the debounce window.
             if in_debounce and delta < hysteresis * 2:
                 return
 
-        # External move confirmed -- set a manual override and remember the
-        # position the user chose, so it can be restored if a transient weather
-        # retraction moves the cover off it before the override expires.
+        # External move confirmed for this cover only. The zone stability hold is
+        # about the automatic intent that still governs the other covers, so it
+        # is deliberately left untouched.
         until = now + timedelta(minutes=self._get_override_duration())
-        self._manual_override_until = until
-        self._manual_position = new_pos
-        self._clear_pending()
-        self._last_commanded = new_pos
+        self._manual_override_until[eid] = until
+        self._manual_position[eid] = new_pos
+        self._last_commanded[eid] = new_pos
         self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
 
     def reset_timers(self) -> None:
-        """Clear both the stability hold and the manual override.
+        """Reset all: clear the zone stability hold, drop the committed intent,
+        and clear every per-cover manual override.
 
-        After this the current live evaluation takes effect on the next refresh
-        -- no waiting out a stability delay or a manual hold. Dropping the
-        committed intent (``_last_intent``) as well is essential: clearing only
-        the pending state would let the next refresh immediately re-open a fresh
-        hold for the same still-pending transition (it is still a "worsening"/
-        "recovery" change relative to the old committed intent), which would
-        merely restart the delay. With no committed intent the next transition
-        classifies as "other" and commits at once.
+        Dropping ``_last_intent`` (not just the pending state) is load-bearing:
+        with no committed intent the next transition classifies as "other" and
+        commits at once, so the button bypasses (not merely restarts) the
+        stability delay.
         """
         self._clear_pending()
         self._last_intent = None
-        self._manual_override_until = None
-        self._manual_position = None
+        self._manual_override_until.clear()
+        self._manual_position.clear()
+        self.hass.async_create_task(self._store.async_save(self._store_payload()))
+        self.hass.async_create_task(self.async_request_refresh())
+
+    def reset_cover_override(self, entity_id: str) -> None:
+        """Clear only this cover's manual hold.
+
+        Leaves sibling covers and the zone stability hold untouched.
+        """
+        self._manual_override_until.pop(entity_id, None)
+        self._manual_position.pop(entity_id, None)
         self.hass.async_create_task(self._store.async_save(self._store_payload()))
         self.hass.async_create_task(self.async_request_refresh())
 
