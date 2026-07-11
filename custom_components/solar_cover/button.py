@@ -1,4 +1,4 @@
-"""Button entity to reset Solar Cover timers for a zone."""
+"""Button entities: zone reset-all + per-cover override reset."""
 
 from __future__ import annotations
 
@@ -11,10 +11,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .coordinator import (
     SolarCoverConfigEntry,
     SolarCoverCoordinator,
+    cover_device_info,
+    cover_slug,
     zone_device_info,
 )
 
-# Action goes through the coordinator (in-memory timer reset); nothing to serialise.
+# Actions go through the coordinator (in-memory reset); nothing to serialise.
 PARALLEL_UPDATES = 0
 
 
@@ -23,15 +25,19 @@ async def async_setup_entry(
     entry: SolarCoverConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the reset-timers button for a zone."""
-    async_add_entities([SolarCoverResetTimersButton(entry.runtime_data, entry)])
+    """Set up the zone reset-all button plus one reset button per cover."""
+    coordinator = entry.runtime_data
+    entities: list[ButtonEntity] = [SolarCoverResetTimersButton(coordinator, entry)]
+    for entity_id in coordinator.cover_entities:
+        entities.append(SolarCoverResetCoverButton(coordinator, entry, entity_id))
+    async_add_entities(entities)
 
 
 class SolarCoverResetTimersButton(ButtonEntity):
-    """Clears the stability hold and manual override in one press.
+    """Reset all: clears the zone stability hold and every per-cover override.
 
-    After a press the current live solar evaluation takes effect on the next
-    refresh -- no waiting out a stability delay or a manual hold.
+    After a press the live solar evaluation takes effect on the next refresh --
+    no waiting out a stability delay or any manual hold.
     """
 
     _attr_has_entity_name = True
@@ -45,5 +51,33 @@ class SolarCoverResetTimersButton(ButtonEntity):
         self._attr_device_info = zone_device_info(entry)
 
     async def async_press(self) -> None:
-        """Reset both timers."""
+        """Reset everything and wait for the refresh to land."""
         self._coordinator.reset_timers()
+        await self._coordinator.async_request_refresh()
+
+
+class SolarCoverResetCoverButton(ButtonEntity):
+    """Clears only its own cover's manual override, leaving siblings and the
+    zone stability hold untouched."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "reset_override"
+    _attr_icon = "mdi:timer-off"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: SolarCoverCoordinator,
+        entry: ConfigEntry,
+        entity_id: str,
+    ) -> None:
+        self._coordinator = coordinator
+        self._entity_id = entity_id
+        slug = cover_slug(entity_id)
+        self._attr_unique_id = f"{entry.entry_id}_{slug}_reset_override"
+        self._attr_device_info = cover_device_info(entry, entity_id)
+
+    async def async_press(self) -> None:
+        """Clear this cover's override and wait for the refresh to land."""
+        self._coordinator.reset_cover_override(self._entity_id)
+        await self._coordinator.async_request_refresh()
