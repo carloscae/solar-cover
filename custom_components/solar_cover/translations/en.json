@@ -205,7 +205,10 @@
     },
     "button": {
       "reset_timers": {
-        "name": "Reset timers"
+        "name": "Reset all"
+      },
+      "reset_override": {
+        "name": "Reset override"
       }
     },
     "sensor": {
