@@ -128,6 +128,21 @@ def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
     )
 
 
+def cover_slug(entity_id: str) -> str:
+    """Normalise a cover entity_id into a stable unique_id/device fragment."""
+    return entity_id.replace(".", "_")
+
+
+def cover_device_info(entry: ConfigEntry, entity_id: str) -> DeviceInfo:
+    """Per-cover device descriptor, nested under the zone device via_device."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{entry.entry_id}_{cover_slug(entity_id)}")},
+        name=f"{entry.title} - {entity_id}",
+        manufacturer="Solar Cover",
+        via_device=(DOMAIN, entry.entry_id),
+    )
+
+
 @dataclass(frozen=True, kw_only=True)
 class CoverSnapshot:
     """Per-cover slice of the coordinator snapshot, one per configured cover."""
@@ -165,7 +180,6 @@ class CoordinatorData:
         self,
         intent: Intent,
         computed_position: float | None,
-        commanded_position: float,
         sun_azimuth: float,
         sun_elevation: float,
         gamma: float,
@@ -176,12 +190,10 @@ class CoordinatorData:
         reason_detail: list[dict[str, Any]],
         stability_pending_until: str | None,
         pending_intent: str | None,
-        manual_override_until: str | None,
         covers: dict[str, CoverSnapshot] | None = None,
     ) -> None:
         self.intent = intent
         self.computed_position = computed_position
-        self.commanded_position = commanded_position
         self.sun_azimuth = sun_azimuth
         self.sun_elevation = sun_elevation
         self.gamma = gamma
@@ -192,7 +204,6 @@ class CoordinatorData:
         self.reason_detail = reason_detail
         self.stability_pending_until = stability_pending_until
         self.pending_intent = pending_intent
-        self.manual_override_until = manual_override_until
         self.covers = covers if covers is not None else {}
 
 
@@ -554,21 +565,6 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 intent=Intent.MANUAL_OVERRIDE if held else effective_intent,
             )
 
-        # Transitional zone-level commanded_position / manual_override_until,
-        # derived from the first configured cover. Removed in the sensor task
-        # once the sensors read the per-cover snapshot directly.
-        first = configured[0] if configured else None
-        zone_commanded: float = (
-            self._last_commanded.get(first, auto_target)
-            if first is not None
-            else auto_target
-        )
-        zone_manual_until: str | None = None
-        if first is not None:
-            first_until = self._manual_override_until.get(first)
-            if first_until is not None and now < first_until:
-                zone_manual_until = first_until.isoformat()
-
         stability_pending_until: str | None = None
         pending_intent: str | None = None
         if self._pending_since is not None:
@@ -590,7 +586,6 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         return CoordinatorData(
             intent=zone_intent,
             computed_position=effective_computed,
-            commanded_position=zone_commanded,
             sun_azimuth=sol_az,
             sun_elevation=sol_el,
             gamma=gamma,
@@ -601,7 +596,6 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             reason_detail=zone_triggers,
             stability_pending_until=stability_pending_until,
             pending_intent=pending_intent,
-            manual_override_until=zone_manual_until,
             covers=covers_snapshot,
         )
 

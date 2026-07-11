@@ -1,4 +1,4 @@
-"""Diagnostic sensor entities for Solar Cover zones."""
+"""Diagnostic sensor entities for Solar Cover zones (zone + per-cover)."""
 
 from __future__ import annotations
 
@@ -21,21 +21,31 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import (
     CoordinatorData,
+    CoverSnapshot,
     SolarCoverConfigEntry,
     SolarCoverCoordinator,
+    cover_device_info,
+    cover_slug,
     zone_device_info,
 )
 
-# Read-only diagnostic sensors backed by the coordinator; no device I/O to serialise.
+# Read-only diagnostic sensors backed by the coordinator; no device I/O.
 PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
 class SolarCoverSensorDescription(SensorEntityDescription):
-    """Extends SensorEntityDescription with value/attribute extractor functions."""
+    """Zone sensor description with value/attribute extractors over CoordinatorData."""
 
     value_fn: Callable[[CoordinatorData], Any]
     attr_fn: Callable[[CoordinatorData], dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class SolarCoverCoverSensorDescription(SensorEntityDescription):
+    """Per-cover sensor description with a value extractor over a CoverSnapshot."""
+
+    value_fn: Callable[[CoverSnapshot], Any]
 
 
 SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
@@ -92,15 +102,6 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         ),
     ),
     SolarCoverSensorDescription(
-        key="commanded_position",
-        translation_key="commanded_position",
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:percent",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: round(d.commanded_position, 1),
-    ),
-    SolarCoverSensorDescription(
         key="fov_entry",
         translation_key="fov_entry",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -127,15 +128,34 @@ SENSOR_DESCRIPTIONS: tuple[SolarCoverSensorDescription, ...] = (
         ),
         attr_fn=lambda d: {"pending_intent": d.pending_intent},
     ),
-    SolarCoverSensorDescription(
+)
+
+
+PER_COVER_SENSOR_DESCRIPTIONS: tuple[SolarCoverCoverSensorDescription, ...] = (
+    SolarCoverCoverSensorDescription(
+        key="commanded_position",
+        translation_key="commanded_position",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:percent",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: round(s.commanded_position, 1),
+    ),
+    SolarCoverCoverSensorDescription(
+        key="intent",
+        translation_key="intent",
+        icon="mdi:sun-compass",
+        value_fn=lambda s: s.intent.value,
+    ),
+    SolarCoverCoverSensorDescription(
         key="manual_override_until",
         translation_key="manual_override_until",
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:timer-lock",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda d: (
-            datetime.fromisoformat(d.manual_override_until)
-            if d.manual_override_until
+        value_fn=lambda s: (
+            datetime.fromisoformat(s.manual_override_until)
+            if s.manual_override_until
             else None
         ),
     ),
@@ -147,16 +167,22 @@ async def async_setup_entry(
     entry: SolarCoverConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Solar Cover diagnostic sensor entities from a config entry."""
+    """Set up zone and per-cover diagnostic sensor entities from a config entry."""
     coordinator = entry.runtime_data
-    async_add_entities(
+    entities: list[SensorEntity] = [
         SolarCoverSensorEntity(coordinator, entry, description)
         for description in SENSOR_DESCRIPTIONS
-    )
+    ]
+    for entity_id in coordinator.cover_entities:
+        for description in PER_COVER_SENSOR_DESCRIPTIONS:
+            entities.append(
+                SolarCoverCoverSensorEntity(coordinator, entry, description, entity_id)
+            )
+    async_add_entities(entities)
 
 
 class SolarCoverSensorEntity(CoordinatorEntity[SolarCoverCoordinator], SensorEntity):
-    """A single diagnostic sensor for a Solar Cover zone."""
+    """A single zone-level diagnostic sensor for a Solar Cover zone."""
 
     entity_description: SolarCoverSensorDescription
     _attr_has_entity_name = True
@@ -186,3 +212,41 @@ class SolarCoverSensorEntity(CoordinatorEntity[SolarCoverCoordinator], SensorEnt
         if self.coordinator.data is None or self.entity_description.attr_fn is None:
             return None
         return self.entity_description.attr_fn(self.coordinator.data)
+
+
+class SolarCoverCoverSensorEntity(
+    CoordinatorEntity[SolarCoverCoordinator], SensorEntity
+):
+    """A single per-cover diagnostic sensor, on its own device."""
+
+    entity_description: SolarCoverCoverSensorDescription
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: SolarCoverCoordinator,
+        entry: ConfigEntry,
+        description: SolarCoverCoverSensorDescription,
+        entity_id: str,
+    ) -> None:
+        """Initialise with coordinator, config entry, description, and cover entity_id.
+
+        The entity_id is the physical cover this sensor reports on.
+        """
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entity_id = entity_id
+        slug = cover_slug(entity_id)
+        self._attr_unique_id = f"{entry.entry_id}_{slug}_{description.key}"
+        self._attr_device_info = cover_device_info(entry, entity_id)
+
+    @property
+    def native_value(self) -> Any:
+        """Return the current value derived from this cover's snapshot."""
+        data = self.coordinator.data
+        if data is None:
+            return None
+        snapshot = data.covers.get(self._entity_id)
+        if snapshot is None:
+            return None
+        return self.entity_description.value_fn(snapshot)

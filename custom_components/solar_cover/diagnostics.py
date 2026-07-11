@@ -41,7 +41,6 @@ async def async_get_config_entry_diagnostics(
             "reason": d.reason,
             "reason_detail": d.reason_detail,
             "computed_position": d.computed_position,
-            "commanded_position": d.commanded_position,
             "sun_elevation": d.sun_elevation,
             "sun_azimuth": d.sun_azimuth,
             "surface_azimuth": d.gamma,
@@ -49,7 +48,14 @@ async def async_get_config_entry_diagnostics(
             "fov_exit": d.fov_exit,
             "stability_pending_until": d.stability_pending_until,
             "pending_intent": d.pending_intent,
-            "manual_override_until": d.manual_override_until,
+            "covers": {
+                entity_id: {
+                    "commanded_position": snapshot.commanded_position,
+                    "manual_override_until": snapshot.manual_override_until,
+                    "intent": snapshot.intent.value,
+                }
+                for entity_id, snapshot in d.covers.items()
+            },
         }
         diagnostics["enabled"] = coordinator.enabled
         diagnostics["last_update_success"] = coordinator.last_update_success
