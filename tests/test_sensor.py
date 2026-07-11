@@ -18,6 +18,7 @@ from custom_components.solar_cover.sensor import (
     SENSOR_DESCRIPTIONS,
     SolarCoverCoverSensorEntity,
     SolarCoverSensorDescription,
+    SolarCoverSensorEntity,
     async_setup_entry,
 )
 
@@ -155,6 +156,51 @@ class TestPerCoverValueFunctions:
     def test_manual_override_until_none(self) -> None:
         snap = _make_snapshot(manual_override_until=None)
         assert self._get("manual_override_until").value_fn(snap) is None
+
+
+class TestZoneSensorEntity:
+    def _entity(self, key: str) -> SolarCoverSensorEntity:
+        desc = next(d for d in SENSOR_DESCRIPTIONS if d.key == key)
+        coordinator = MagicMock()
+        coordinator.data = _make_coordinator_data()
+        entry = MagicMock(spec=MockConfigEntry)
+        entry.entry_id = "test_entry_id"
+        entry.title = "Zone: Living Room"
+        with patch(
+            "custom_components.solar_cover.sensor.CoordinatorEntity.__init__",
+            return_value=None,
+        ):
+            entity = SolarCoverSensorEntity(coordinator, entry, desc)
+            entity.coordinator = coordinator
+        return entity
+
+    def test_unique_id_scheme(self) -> None:
+        entity = self._entity("intent")
+        assert entity._attr_unique_id == "test_entry_id_intent"
+
+    def test_device_info_is_zone_device(self) -> None:
+        entity = self._entity("intent")
+        info = entity._attr_device_info
+        assert (DOMAIN, "test_entry_id") in info["identifiers"]
+
+    def test_native_value_delegates_to_value_fn(self) -> None:
+        entity = self._entity("sun_elevation")
+        assert entity.native_value == pytest.approx(42.7)
+
+    def test_native_value_none_when_coordinator_data_none(self) -> None:
+        entity = self._entity("intent")
+        entity.coordinator.data = None
+        assert entity.native_value is None
+
+    def test_extra_state_attributes_none_without_attr_fn(self) -> None:
+        entity = self._entity("sun_elevation")
+        assert entity.extra_state_attributes is None
+
+    def test_extra_state_attributes_uses_attr_fn(self) -> None:
+        entity = self._entity("intent")
+        attrs = entity.extra_state_attributes
+        assert attrs is not None
+        assert "position_curve" in attrs
 
 
 class TestPerCoverEntity:
