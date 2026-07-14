@@ -491,7 +491,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             above_horizon = sol_el > 0
 
             # Per-cover target resolution. Weather safety first (unconditionally),
-            # then an active per-cover hold (restore path), then automatic.
+            # then an active per-cover hold (restore path), then automatic --
+            # split between SHADING (continuously re-asserted) and inactive
+            # (asserted only on transition, see below).
             targets: dict[str, float] = {}
             for eid in self.cover_entities:
                 last = self._last_commanded.get(eid)
@@ -517,10 +519,20 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     # restore is exempt from below-horizon and stability gating.
                     needs = last is not None and abs(manual - last) >= hysteresis
                     allow = True
-                else:
+                elif auto_intent == Intent.SHADING:
                     target = auto_target
                     delta = abs(auto_target - last) if last is not None else None
                     needs = delta is None or delta >= hysteresis or intent_changed
+                    allow = above_horizon and should_commit
+                else:
+                    # Inactive (sun-low / outside-FOV / overcast): auto_target is
+                    # static while this intent holds, so only (re)assert it on the
+                    # transition INTO the intent. Once committed, a lapsed manual
+                    # override must NOT snap the cover back to inactive_position --
+                    # it stays put until the sun genuinely re-enters range (a real
+                    # intent change) or the user hits reset.
+                    target = auto_target
+                    needs = last is None or intent_changed
                     allow = above_horizon and should_commit
                 if self._enabled and allow and needs:
                     targets[eid] = target

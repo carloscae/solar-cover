@@ -308,6 +308,78 @@ class TestManualPositionRestore:
         assert coord._last_commanded["cover.b"] == 50.0
 
 
+class TestInactiveHoldSticky:
+    """A lapsed per-cover override must not snap the cover back to
+    inactive_position while the automatic intent is still inactive and
+    unchanged -- only a genuine intent transition (re)asserts it."""
+
+    @staticmethod
+    def _wire_solar(coord: SolarCoverCoordinator) -> None:
+        coord._solar.sun_position = MagicMock(return_value=(180.0, 10.0))
+        coord._solar.hourly_curve = MagicMock(return_value=[])
+        coord._solar.fov_window = MagicMock(return_value=(None, None))
+
+    @pytest.mark.asyncio
+    async def test_expired_override_does_not_reopen_when_intent_unchanged(
+        self,
+    ) -> None:
+        coord = _make_coordinator()
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        # A "sleep time" manual close, whose 2-hour hold already expired.
+        coord._last_intent = Intent.INACTIVE_SUN_LOW
+        coord._last_commanded = {"cover.test": 0.0}
+        coord._manual_position = {"cover.test": 0.0}
+        coord._manual_override_until = {"cover.test": _T0 - timedelta(minutes=1)}
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(
+                    Intent.INACTIVE_SUN_LOW, None, "Idle (sun too low)", []
+                ),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+            await coord._async_update_data()
+
+        assert coord.hass.services.async_call.await_count == 0
+        assert coord._last_commanded["cover.test"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_inactive_position_still_commanded_on_intent_transition(
+        self,
+    ) -> None:
+        coord = _make_coordinator()
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        # Zone was SHADING; a genuine transition into sun-too-low must still
+        # drive the cover to the configured inactive_position.
+        coord._last_intent = Intent.SHADING
+        coord._last_commanded = {"cover.test": 70.0}
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(
+                    Intent.INACTIVE_SUN_LOW, None, "Idle (sun too low)", []
+                ),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+            await coord._async_update_data()
+
+        assert coord.hass.services.async_call.await_count == 1
+        assert coord.hass.services.async_call.call_args.args[2]["position"] == 0
+        assert coord._last_commanded["cover.test"] == 0.0
+
+
 class TestCommandFailureHandling:
     @staticmethod
     def _wire_solar(coord: SolarCoverCoordinator) -> None:
