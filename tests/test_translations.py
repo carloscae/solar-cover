@@ -21,4 +21,16 @@ def test_reset_all_label_present_in_both_files() -> None:
 def test_reset_override_label_present_in_both_files() -> None:
     for name in ("strings.json", "translations/en.json"):
         buttons = _load(name)["entity"]["button"]
-        assert buttons["reset_override"]["name"] == "Reset override"
+        assert buttons["reset_override"]["name"] == "{cover} reset override"
+
+
+def test_cover_intent_distinct_from_zone_intent_in_both_files() -> None:
+    # Per-cover sensors share the zone device now, so "intent" (zone) and
+    # "cover_intent" (per-cover) must be separate translation keys with
+    # separate names, or two entities on the same device would render
+    # identically in the UI.
+    for name in ("strings.json", "translations/en.json"):
+        sensors = _load(name)["entity"]["sensor"]
+        assert sensors["intent"]["name"] == "Active intent"
+        assert sensors["cover_intent"]["name"] == "{cover} active intent"
+        assert sensors["cover_intent"]["state"] == sensors["intent"]["state"]

@@ -233,11 +233,24 @@ class TestPerCoverEntity:
         entity = self._entity("commanded_position")
         assert entity.native_value == 30.0
 
-    def test_device_info_nested_via_zone(self) -> None:
+    def test_device_info_is_shared_zone_device(self) -> None:
+        # Per-cover sensors live on the zone device, not their own -- fewer
+        # devices in the UI, disambiguated by a translation placeholder instead.
         entity = self._entity("intent")
         info = entity._attr_device_info
-        assert (DOMAIN, "test_entry_id_cover_living_a") in info["identifiers"]
-        assert info["via_device"] == (DOMAIN, "test_entry_id")
+        assert (DOMAIN, "test_entry_id") in info["identifiers"]
+        assert "via_device" not in info
+
+    def test_translation_placeholder_identifies_the_cover(self) -> None:
+        entity = self._entity("commanded_position")
+        assert entity._attr_translation_placeholders == {"cover": "living_a"}
+
+    def test_intent_uses_distinct_translation_key_from_zone_sensor(self) -> None:
+        # The zone-level "intent" sensor and the per-cover one now share a
+        # device, so they must not share a translation_key (else identical
+        # display names: "Zone: X Active intent" x N).
+        desc = next(d for d in PER_COVER_SENSOR_DESCRIPTIONS if d.key == "intent")
+        assert desc.translation_key == "cover_intent"
 
     def test_native_value_none_when_cover_absent(self) -> None:
         entity = self._entity("intent")

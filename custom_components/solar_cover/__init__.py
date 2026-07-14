@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_WIND_THRESHOLD,
@@ -76,26 +77,49 @@ def _integration_data(hass: HomeAssistant) -> dict[str, Any]:
     return {}
 
 
-def _async_cleanup_stale_cover_devices(
-    hass: HomeAssistant, entry: ConfigEntry, cover_entities: list[str]
+def _async_cleanup_legacy_cover_devices(
+    hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
-    """Remove per-cover devices for covers no longer in ``cover_entities``.
+    """One-time migration: remove now-obsolete per-cover devices.
 
-    HA does not auto-remove devices when a config list shrinks. Per-cover device
-    identifiers are ``(DOMAIN, f"{entry_id}_{slug}")``; the zone device is
-    ``(DOMAIN, entry_id)``. Removing a device cascades to its entities.
+    Before per-cover entities were aggregated onto the shared zone device,
+    each configured cover got its own HA device (identifier
+    ``f"{entry_id}_{cover_slug(eid)}"``, nested under the zone device). Their
+    entities move to the zone device automatically on upgrade (unique_id is
+    unchanged), but HA does not delete a device just because it lost its last
+    entity -- left alone, every existing install would keep an empty ghost
+    device per cover forever, which is exactly the clutter the aggregation
+    was meant to remove. Idempotent: a no-op once the ghosts are gone.
     """
     dev_reg = dr.async_get(hass)
     zone_identifier = entry.entry_id
-    expected = {f"{entry.entry_id}_{cover_slug(eid)}" for eid in cover_entities}
-    prefix = f"{entry.entry_id}_"
-    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+    for device in list(dr.async_entries_for_config_entry(dev_reg, entry.entry_id)):
         for domain, identifier in device.identifiers:
-            if domain != DOMAIN or identifier == zone_identifier:
-                continue
-            if identifier.startswith(prefix) and identifier not in expected:
+            if domain == DOMAIN and identifier != zone_identifier:
                 dev_reg.async_remove_device(device.id)
                 break
+
+
+def _async_cleanup_stale_cover_entities(
+    hass: HomeAssistant, entry: ConfigEntry, cover_entities: list[str]
+) -> None:
+    """Remove per-cover entities for covers no longer in ``cover_entities``.
+
+    Per-cover entities live on the shared zone device (not their own device),
+    so there is no device to cascade-remove them. Their unique_id is
+    ``f"{entry_id}_{cover_slug(eid)}_{key}"``; HA does not auto-remove entities
+    dropped from a config entry's ``async_add_entities``, so a cover removed
+    from the zone would otherwise leave orphaned entities in the registry.
+    """
+    ent_reg = er.async_get(hass)
+    valid_prefixes = tuple(
+        f"{entry.entry_id}_{cover_slug(eid)}_" for eid in cover_entities
+    )
+    stale_marker = f"{entry.entry_id}_cover_"
+    for entity in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
+        uid = entity.unique_id
+        if uid.startswith(stale_marker) and not uid.startswith(valid_prefixes):
+            ent_reg.async_remove(entity.entity_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -136,7 +160,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ZONE)
-    _async_cleanup_stale_cover_devices(
+    _async_cleanup_legacy_cover_devices(hass, entry)
+    _async_cleanup_stale_cover_entities(
         hass, entry, list(zone_data.get("cover_entities", []))
     )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

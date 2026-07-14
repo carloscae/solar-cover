@@ -24,7 +24,7 @@ from .coordinator import (
     CoverSnapshot,
     SolarCoverConfigEntry,
     SolarCoverCoordinator,
-    cover_device_info,
+    cover_label,
     cover_slug,
     zone_device_info,
 )
@@ -143,7 +143,7 @@ PER_COVER_SENSOR_DESCRIPTIONS: tuple[SolarCoverCoverSensorDescription, ...] = (
     ),
     SolarCoverCoverSensorDescription(
         key="intent",
-        translation_key="intent",
+        translation_key="cover_intent",
         icon="mdi:sun-compass",
         value_fn=lambda s: s.intent.value,
     ),
@@ -217,7 +217,7 @@ class SolarCoverSensorEntity(CoordinatorEntity[SolarCoverCoordinator], SensorEnt
 class SolarCoverCoverSensorEntity(
     CoordinatorEntity[SolarCoverCoordinator], SensorEntity
 ):
-    """A single per-cover diagnostic sensor, on its own device."""
+    """A single per-cover diagnostic sensor, living on the shared zone device."""
 
     entity_description: SolarCoverCoverSensorDescription
     _attr_has_entity_name = True
@@ -238,7 +238,8 @@ class SolarCoverCoverSensorEntity(
         self._entity_id = entity_id
         slug = cover_slug(entity_id)
         self._attr_unique_id = f"{entry.entry_id}_{slug}_{description.key}"
-        self._attr_device_info = cover_device_info(entry, entity_id)
+        self._attr_device_info = zone_device_info(entry)
+        self._attr_translation_placeholders = {"cover": cover_label(entity_id)}
 
     @property
     def native_value(self) -> Any:

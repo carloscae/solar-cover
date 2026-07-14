@@ -61,11 +61,17 @@ class TestResetCoverButton:
         button, _ = _make_cover_button()
         assert button.unique_id == "test_entry_cover_living_a_reset_override"
 
-    def test_device_info_nested_via_zone(self) -> None:
+    def test_device_info_is_shared_zone_device(self) -> None:
+        # Per-cover buttons live on the zone device, not their own -- fewer
+        # devices in the UI, disambiguated by a translation placeholder instead.
         button, _ = _make_cover_button()
         info = button._attr_device_info
-        assert (DOMAIN, "test_entry_cover_living_a") in info["identifiers"]
-        assert info["via_device"] == (DOMAIN, "test_entry")
+        assert (DOMAIN, "test_entry") in info["identifiers"]
+        assert "via_device" not in info
+
+    def test_translation_placeholder_identifies_the_cover(self) -> None:
+        button, _ = _make_cover_button()
+        assert button._attr_translation_placeholders == {"cover": "living_a"}
 
     @pytest.mark.asyncio
     async def test_press_resets_only_this_cover(self) -> None:

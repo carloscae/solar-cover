@@ -129,18 +129,19 @@ def zone_device_info(entry: ConfigEntry) -> DeviceInfo:
 
 
 def cover_slug(entity_id: str) -> str:
-    """Normalise a cover entity_id into a stable unique_id/device fragment."""
+    """Normalise a cover entity_id into a stable unique_id fragment."""
     return entity_id.replace(".", "_")
 
 
-def cover_device_info(entry: ConfigEntry, entity_id: str) -> DeviceInfo:
-    """Per-cover device descriptor, nested under the zone device via_device."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, f"{entry.entry_id}_{cover_slug(entity_id)}")},
-        name=f"{entry.title} - {entity_id}",
-        manufacturer="Solar Cover",
-        via_device=(DOMAIN, entry.entry_id),
-    )
+def cover_label(entity_id: str) -> str:
+    """Human-facing fragment identifying a cover within its zone's entity names.
+
+    Per-cover entities all live on the shared zone device (not their own
+    device), so their name must disambiguate itself via a translation
+    placeholder -- this strips the leading "cover." domain, e.g.
+    "cover.kids_room" -> "kids_room".
+    """
+    return entity_id.partition(".")[2] or entity_id
 
 
 @dataclass(frozen=True, kw_only=True)

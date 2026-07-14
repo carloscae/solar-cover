@@ -266,12 +266,27 @@ class TestMigration:
 
 
 class TestStaleCoverCleanup:
-    async def test_dropped_cover_device_removed_on_reload(
+    """Per-cover entities live on the shared zone device now (no per-cover
+    device to cascade-remove), so cleanup on a dropped cover must remove the
+    orphaned entities directly from the entity registry."""
+
+    @staticmethod
+    def _cover_uids(entry_id: str, eid: str) -> list[tuple[str, str]]:
+        """(entity_domain, unique_id) pairs for every per-cover entity of eid."""
+        from custom_components.solar_cover.coordinator import cover_slug
+
+        slug = cover_slug(eid)
+        return [
+            ("sensor", f"{entry_id}_{slug}_commanded_position"),
+            ("sensor", f"{entry_id}_{slug}_intent"),
+            ("sensor", f"{entry_id}_{slug}_manual_override_until"),
+            ("button", f"{entry_id}_{slug}_reset_override"),
+        ]
+
+    async def test_dropped_cover_entities_removed_on_reload(
         self, hass: HomeAssistant
     ) -> None:
-        from homeassistant.helpers import device_registry as dr
-
-        from custom_components.solar_cover.coordinator import cover_slug
+        from homeassistant.helpers import entity_registry as er
 
         _integration_entry(hass)
         zone = MockConfigEntry(
@@ -294,11 +309,11 @@ class TestStaleCoverCleanup:
         assert await hass.config_entries.async_setup(zone.entry_id)
         await hass.async_block_till_done()
 
-        dev_reg = dr.async_get(hass)
-        # Both per-cover devices exist after first setup.
+        ent_reg = er.async_get(hass)
+        # Both covers' entities exist after first setup.
         for eid in ("cover.a", "cover.b"):
-            ident = (DOMAIN, f"{zone.entry_id}_{cover_slug(eid)}")
-            assert dev_reg.async_get_device(identifiers={ident}) is not None
+            for domain, uid in self._cover_uids(zone.entry_id, eid):
+                assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
 
         # Drop cover.b from the zone and reload.
         hass.config_entries.async_update_entry(
@@ -306,25 +321,15 @@ class TestStaleCoverCleanup:
         )
         await hass.async_block_till_done()
 
-        assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
-            )
-            is not None
-        )
-        assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.b')}")}
-            )
-            is None
-        )
+        for domain, uid in self._cover_uids(zone.entry_id, "cover.a"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
+        for domain, uid in self._cover_uids(zone.entry_id, "cover.b"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is None
 
-    async def test_all_covers_dropped_keeps_zone_device(
+    async def test_all_covers_dropped_keeps_zone_entities(
         self, hass: HomeAssistant
     ) -> None:
-        from homeassistant.helpers import device_registry as dr
-
-        from custom_components.solar_cover.coordinator import cover_slug
+        from homeassistant.helpers import entity_registry as er
 
         _integration_entry(hass)
         zone = MockConfigEntry(
@@ -347,14 +352,10 @@ class TestStaleCoverCleanup:
         assert await hass.config_entries.async_setup(zone.entry_id)
         await hass.async_block_till_done()
 
-        dev_reg = dr.async_get(hass)
-        # Per-cover device exists after first setup.
-        assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
-            )
-            is not None
-        )
+        ent_reg = er.async_get(hass)
+        # Per-cover entities exist after first setup.
+        for domain, uid in self._cover_uids(zone.entry_id, "cover.a"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
 
         # Drop all covers from the zone and reload.
         hass.config_entries.async_update_entry(
@@ -362,24 +363,19 @@ class TestStaleCoverCleanup:
         )
         await hass.async_block_till_done()
 
-        # Per-cover device is gone.
+        # Per-cover entities are gone.
+        for domain, uid in self._cover_uids(zone.entry_id, "cover.a"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is None
+        # Zone-level entities (sharing the same device) are untouched.
         assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone.entry_id}_{cover_slug('cover.a')}")}
-            )
-            is None
-        )
-        # Zone device still exists.
-        assert (
-            dev_reg.async_get_device(identifiers={(DOMAIN, zone.entry_id)}) is not None
+            ent_reg.async_get_entity_id("sensor", DOMAIN, f"{zone.entry_id}_intent")
+            is not None
         )
 
-    async def test_cleanup_does_not_touch_other_zones_devices(
+    async def test_cleanup_does_not_touch_other_zones_entities(
         self, hass: HomeAssistant
     ) -> None:
-        from homeassistant.helpers import device_registry as dr
-
-        from custom_components.solar_cover.coordinator import cover_slug
+        from homeassistant.helpers import entity_registry as er
 
         _integration_entry(hass)
         zone_a = MockConfigEntry(
@@ -423,20 +419,12 @@ class TestStaleCoverCleanup:
             assert await hass.config_entries.async_setup(zone_b.entry_id)
         await hass.async_block_till_done()
 
-        dev_reg = dr.async_get(hass)
-        # Both per-cover devices exist.
-        assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone_a.entry_id}_{cover_slug('cover.a')}")}
-            )
-            is not None
-        )
-        assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone_b.entry_id}_{cover_slug('cover.b')}")}
-            )
-            is not None
-        )
+        ent_reg = er.async_get(hass)
+        # Both zones' cover entities exist.
+        for domain, uid in self._cover_uids(zone_a.entry_id, "cover.a"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
+        for domain, uid in self._cover_uids(zone_b.entry_id, "cover.b"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
 
         # Drop all covers from zone_a only.
         hass.config_entries.async_update_entry(
@@ -444,17 +432,71 @@ class TestStaleCoverCleanup:
         )
         await hass.async_block_till_done()
 
-        # Zone A's per-cover device is gone.
+        # Zone A's per-cover entities are gone.
+        for domain, uid in self._cover_uids(zone_a.entry_id, "cover.a"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is None
+        # Zone B's per-cover entities are untouched.
+        for domain, uid in self._cover_uids(zone_b.entry_id, "cover.b"):
+            assert ent_reg.async_get_entity_id(domain, DOMAIN, uid) is not None
+
+
+class TestLegacyCoverDeviceCleanup:
+    """Upgrade path: installs from before the per-cover-device aggregation have
+    a real per-cover device already sitting in the registry. Entities move to
+    the zone device automatically (unique_id unchanged), but the now-empty
+    device itself must be swept away too, or it lingers as a permanent ghost --
+    exactly the clutter the aggregation was meant to fix."""
+
+    async def test_preexisting_percover_device_is_removed_on_setup(
+        self, hass: HomeAssistant
+    ) -> None:
+        from homeassistant.helpers import device_registry as dr
+
+        from custom_components.solar_cover.const import DOMAIN as SC_DOMAIN
+        from custom_components.solar_cover.coordinator import cover_slug
+
+        _integration_entry(hass)
+        zone = MockConfigEntry(
+            domain=DOMAIN,
+            data={
+                "entry_type": ENTRY_TYPE_ZONE,
+                "name": "South",
+                "cover_type": "vertical",
+                "azimuth": 180,
+                "fov_left": 90,
+                "fov_right": 90,
+                "elevation_threshold": 25.0,
+                "cover_entities": ["cover.a"],
+                "window_height": 2.5,
+                "glare_depth": 1.0,
+            },
+            title="Zone: South",
+        )
+        zone.add_to_hass(hass)
+
+        # Simulate a device left behind by a pre-aggregation install: create
+        # it directly in the registry before the (new) integration ever runs.
+        dev_reg = dr.async_get(hass)
+        legacy_identifier = f"{zone.entry_id}_{cover_slug('cover.a')}"
+        dev_reg.async_get_or_create(
+            config_entry_id=zone.entry_id,
+            identifiers={(SC_DOMAIN, legacy_identifier)},
+            name="Zone: South - cover.a",
+        )
         assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone_a.entry_id}_{cover_slug('cover.a')}")}
-            )
+            dev_reg.async_get_device(identifiers={(SC_DOMAIN, legacy_identifier)})
+            is not None
+        )
+
+        assert await hass.config_entries.async_setup(zone.entry_id)
+        await hass.async_block_till_done()
+
+        # The ghost per-cover device is gone; the zone device remains.
+        assert (
+            dev_reg.async_get_device(identifiers={(SC_DOMAIN, legacy_identifier)})
             is None
         )
-        # Zone B's per-cover device is untouched.
         assert (
-            dev_reg.async_get_device(
-                identifiers={(DOMAIN, f"{zone_b.entry_id}_{cover_slug('cover.b')}")}
-            )
+            dev_reg.async_get_device(identifiers={(SC_DOMAIN, zone.entry_id)})
             is not None
         )

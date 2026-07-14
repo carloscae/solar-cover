@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .coordinator import (
     SolarCoverConfigEntry,
     SolarCoverCoordinator,
-    cover_device_info,
+    cover_label,
     cover_slug,
     zone_device_info,
 )
@@ -75,7 +75,8 @@ class SolarCoverResetCoverButton(ButtonEntity):
         self._entity_id = entity_id
         slug = cover_slug(entity_id)
         self._attr_unique_id = f"{entry.entry_id}_{slug}_reset_override"
-        self._attr_device_info = cover_device_info(entry, entity_id)
+        self._attr_device_info = zone_device_info(entry)
+        self._attr_translation_placeholders = {"cover": cover_label(entity_id)}
 
     async def async_press(self) -> None:
         """Clear this cover's override and wait for the refresh to land."""

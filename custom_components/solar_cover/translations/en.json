@@ -208,12 +208,23 @@
         "name": "Reset all"
       },
       "reset_override": {
-        "name": "Reset override"
+        "name": "{cover} reset override"
       }
     },
     "sensor": {
       "intent": {
         "name": "Active intent",
+        "state": {
+          "shading": "Shading",
+          "inactive_sun_low": "Sun too low",
+          "inactive_outside_fov": "Sun outside window",
+          "inactive_weather": "Retracted - weather",
+          "inactive_overcast": "Retracted - overcast",
+          "manual_override": "Manual override"
+        }
+      },
+      "cover_intent": {
+        "name": "{cover} active intent",
         "state": {
           "shading": "Shading",
           "inactive_sun_low": "Sun too low",
@@ -239,7 +250,7 @@
         "name": "Calculated position"
       },
       "commanded_position": {
-        "name": "Commanded position"
+        "name": "{cover} commanded position"
       },
       "fov_entry": {
         "name": "Sun enters window"
@@ -251,7 +262,7 @@
         "name": "Pending change commits"
       },
       "manual_override_until": {
-        "name": "Manual hold expires"
+        "name": "{cover} manual hold expires"
       }
     }
   }
