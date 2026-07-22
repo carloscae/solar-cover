@@ -51,6 +51,7 @@ from .const import (
     CONF_STABILITY_DELAY_ON_RECOVERY,
     CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
+    CONF_WEATHER_ACTION,
     CONF_WEATHER_ENTITY,
     CONF_WIND_THRESHOLD,
     CONF_WINDOW_HEIGHT,
@@ -58,11 +59,14 @@ from .const import (
     DEFAULT_INACTIVE_POSITION,
     DEFAULT_OVERRIDE_DURATION,
     DEFAULT_STABILITY_DELAY,
+    DEFAULT_WEATHER_ACTION,
     DOMAIN,
     UPDATE_INTERVAL_MINUTES,
+    WEATHER_CLOSE_POSITION,
     CoverType,
     Intent,
     TiltRange,
+    WeatherAction,
 )
 from .intent import IntentInput, evaluate_intent
 from .solar import SolarEngine
@@ -441,6 +445,9 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             cloud_threshold=self._integration.get(CONF_CLOUD_THRESHOLD),
             radiation=radiation,
             radiation_threshold=self._integration.get(CONF_RADIATION_THRESHOLD),
+            weather_action=WeatherAction(
+                self._zone.get(CONF_WEATHER_ACTION, DEFAULT_WEATHER_ACTION)
+            ),
             manual_override_until=None,
             now=now,
             cover_type=CoverType(self._zone[CONF_COVER_TYPE]),
@@ -462,11 +469,19 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
             CONF_INACTIVE_POSITION_OVERRIDE,
             self._integration.get(CONF_INACTIVE_POSITION, DEFAULT_INACTIVE_POSITION),
         )
-        raw_position: float = (
-            computed_pos
-            if auto_intent == Intent.SHADING and computed_pos is not None
-            else float(inactive_pos)
+        weather_action = WeatherAction(
+            self._zone.get(CONF_WEATHER_ACTION, DEFAULT_WEATHER_ACTION)
         )
+        raw_position: float
+        if (
+            auto_intent == Intent.INACTIVE_WEATHER
+            and weather_action == WeatherAction.CLOSE
+        ):
+            raw_position = WEATHER_CLOSE_POSITION
+        elif auto_intent == Intent.SHADING and computed_pos is not None:
+            raw_position = computed_pos
+        else:
+            raw_position = float(inactive_pos)
 
         min_pos = self._zone.get(CONF_MIN_POSITION)
         max_pos = self._zone.get(CONF_MAX_POSITION)
@@ -501,14 +516,16 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 held_until = self._manual_override_until.get(eid)
                 held = held_until is not None and now < held_until
                 if auto_intent == Intent.INACTIVE_WEATHER:
-                    # Retract for safety regardless of the hold; do NOT clear the
-                    # hold -- it resumes once weather clears.
+                    # Assert the weather-safety position once per episode,
+                    # regardless of any hold -- do NOT clear the hold, it
+                    # resumes once weather clears. Once asserted (the
+                    # transition INTO this intent), leave the cover alone for
+                    # the rest of the episode: a manual move made mid-warning
+                    # must not be fought every refresh, and must survive its
+                    # own override timer lapsing while weather is still active
+                    # (same sticky rule as the other inactive intents below).
                     target = auto_target
-                    needs = (
-                        last is None
-                        or abs(target - last) >= hysteresis
-                        or intent_changed
-                    )
+                    needs = last is None or intent_changed
                     allow = above_horizon and should_commit
                 elif held:
                     manual = self._manual_position.get(eid)

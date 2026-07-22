@@ -31,10 +31,12 @@ from .const import (
     CONF_GLARE_DEPTH,
     CONF_HYSTERESIS,
     CONF_INACTIVE_POSITION,
+    CONF_INACTIVE_POSITION_OVERRIDE,
     CONF_MAX_POSITION,
     CONF_MIN_POSITION,
     CONF_MIN_TEMP,
     CONF_OVERRIDE_DURATION,
+    CONF_OVERRIDE_DURATION_OVERRIDE,
     CONF_RADIATION_ENTITY,
     CONF_RADIATION_THRESHOLD,
     CONF_SLAT_SPACING,
@@ -43,6 +45,7 @@ from .const import (
     CONF_STABILITY_DELAY_ON_RECOVERY,
     CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
+    CONF_WEATHER_ACTION,
     CONF_WEATHER_ENTITY,
     CONF_WIND_THRESHOLD,
     CONF_WINDOW_HEIGHT,
@@ -51,11 +54,13 @@ from .const import (
     DEFAULT_INACTIVE_POSITION,
     DEFAULT_OVERRIDE_DURATION,
     DEFAULT_STABILITY_DELAY,
+    DEFAULT_WEATHER_ACTION,
     DOMAIN,
     ENTRY_TYPE_INTEGRATION,
     ENTRY_TYPE_ZONE,
     CoverType,
     TiltRange,
+    WeatherAction,
 )
 
 
@@ -111,6 +116,42 @@ def _hysteresis_selector() -> selector.NumberSelector:
             step=0.5,
             mode=NumberSelectorMode.SLIDER,
             unit_of_measurement="%",
+        )
+    )
+
+
+def _weather_action_selector() -> selector.SelectSelector:
+    """Build the per-zone weather-response SelectSelector."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[e.value for e in WeatherAction],
+            translation_key=CONF_WEATHER_ACTION,
+        )
+    )
+
+
+def _inactive_position_override_selector() -> selector.NumberSelector:
+    """Build the per-zone rest-position-override NumberSelector."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=0,
+            max=100,
+            step=1,
+            mode=NumberSelectorMode.SLIDER,
+            unit_of_measurement="%",
+        )
+    )
+
+
+def _override_duration_override_selector() -> selector.NumberSelector:
+    """Build the per-zone manual-override-duration-override NumberSelector."""
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=15,
+            max=480,
+            step=15,
+            mode=NumberSelectorMode.SLIDER,
+            unit_of_measurement="min",
         )
     )
 
@@ -347,6 +388,9 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
                     unit_of_measurement="%",
                 )
             ),
+            vol.Optional(
+                CONF_WEATHER_ACTION, default=DEFAULT_WEATHER_ACTION
+            ): _weather_action_selector(),
         }
         if cover_type == CoverType.VERTICAL:
             fields[vol.Optional(CONF_WINDOW_HEIGHT, default=2.5)] = (
@@ -437,12 +481,21 @@ class SolarCoverConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             fields[vol.Optional(CONF_TILT_RANGE, default=TiltRange.SINGLE)] = (
                 selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=[e.value for e in TiltRange])
+                    selector.SelectSelectorConfig(
+                        options=[e.value for e in TiltRange],
+                        translation_key=CONF_TILT_RANGE,
+                    )
                 )
             )
-        # Advanced: per-zone motor hysteresis. Unset by default so the
+        # Advanced: per-zone overrides. Unset by default so the
         # integration-global value remains the fallback in the coordinator.
         fields[vol.Optional(CONF_HYSTERESIS)] = _hysteresis_selector()
+        fields[vol.Optional(CONF_INACTIVE_POSITION_OVERRIDE)] = (
+            _inactive_position_override_selector()
+        )
+        fields[vol.Optional(CONF_OVERRIDE_DURATION_OVERRIDE)] = (
+            _override_duration_override_selector()
+        )
 
         schema = vol.Schema(fields)
         if user_input is not None:
@@ -688,19 +741,37 @@ class ZoneOptionsFlow(OptionsFlow):
                         unit_of_measurement="%",
                     )
                 ),
-                # Advanced: per-zone motor hysteresis. Unset by default so the
+                vol.Optional(
+                    CONF_WEATHER_ACTION,
+                    default=data.get(CONF_WEATHER_ACTION, DEFAULT_WEATHER_ACTION),
+                ): _weather_action_selector(),
+                # Advanced: per-zone overrides. Unset by default so the
                 # integration-global value remains the coordinator fallback.
                 vol.Optional(CONF_HYSTERESIS): _hysteresis_selector(),
+                vol.Optional(
+                    CONF_INACTIVE_POSITION_OVERRIDE
+                ): _inactive_position_override_selector(),
+                vol.Optional(
+                    CONF_OVERRIDE_DURATION_OVERRIDE
+                ): _override_duration_override_selector(),
             }
         )
         if user_input is not None:
             # Preserve just-entered values when re-rendering on a validation error.
             schema = self.add_suggested_values_to_schema(schema, user_input)
-        elif data.get(CONF_HYSTERESIS) is not None:
-            # Surface a previously stored per-zone hysteresis as the form default.
-            schema = self.add_suggested_values_to_schema(
-                schema, {CONF_HYSTERESIS: data.get(CONF_HYSTERESIS)}
-            )
+        else:
+            # Surface previously stored per-zone advanced overrides as defaults.
+            suggested = {
+                key: data.get(key)
+                for key in (
+                    CONF_HYSTERESIS,
+                    CONF_INACTIVE_POSITION_OVERRIDE,
+                    CONF_OVERRIDE_DURATION_OVERRIDE,
+                )
+                if data.get(key) is not None
+            }
+            if suggested:
+                schema = self.add_suggested_values_to_schema(schema, suggested)
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
 
     async def async_step_geometry_vertical(
@@ -848,7 +919,10 @@ class ZoneOptionsFlow(OptionsFlow):
                     CONF_TILT_RANGE,
                     default=data.get(CONF_TILT_RANGE, TiltRange.SINGLE),
                 ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=[e.value for e in TiltRange])
+                    selector.SelectSelectorConfig(
+                        options=[e.value for e in TiltRange],
+                        translation_key=CONF_TILT_RANGE,
+                    )
                 ),
             }
         )

@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .const import CoverType, Intent, ReasonCode, TiltRange
+from .const import CoverType, Intent, ReasonCode, TiltRange, WeatherAction
 from .geometry import horizontal_position, tilt_position, vertical_position
 from .solar import _in_fov
 from .solar import gamma as compute_gamma
@@ -38,6 +38,8 @@ class IntentInput:
     cloud_threshold: float | None = None
     radiation: float | None = None
     radiation_threshold: float | None = None
+    # Zone's response to the weather-safety gate
+    weather_action: WeatherAction = WeatherAction.RETRACT
     # Cover type (for geometry dispatch)
     cover_type: CoverType = CoverType.VERTICAL
     # Vertical geometry
@@ -109,8 +111,9 @@ def evaluate_intent(inp: IntentInput) -> IntentResult:
     """Run the sequential gate model and return an :class:`IntentResult`.
 
     Gates evaluated in order:
-    1. Weather safety -- rain, high wind, or low temperature force retraction.
-       All active conditions are reported, not just the first one.
+    1. Weather safety -- rain, high wind, or low temperature trigger the
+       zone's configured weather_action (retract, close, or ignore). All
+       active conditions are reported, not just the first one.
     2. Manual override -- user has taken manual control. Holds against the
        comfort gates below, but loses to weather safety above so wind/rain can
        still retract for protection.
@@ -120,12 +123,17 @@ def evaluate_intent(inp: IntentInput) -> IntentResult:
     6. Shading -- compute geometry position.
     """
     # Gate 1: weather safety -- must win over manual override. Collect every
-    # active trigger so the user sees all the limits they crossed.
-    weather = _weather_triggers(inp)
+    # active trigger so the user sees all the limits they crossed. A zone set
+    # to IGNORE skips this gate entirely, as if no weather entity were
+    # configured for it.
+    weather = (
+        [] if inp.weather_action == WeatherAction.IGNORE else _weather_triggers(inp)
+    )
     if weather:
         joined = "; ".join(t.text for t in weather)
+        verb = "Closed" if inp.weather_action == WeatherAction.CLOSE else "Retracted"
         return IntentResult(
-            Intent.INACTIVE_WEATHER, None, f"Retracted (weather): {joined}", weather
+            Intent.INACTIVE_WEATHER, None, f"{verb} (weather): {joined}", weather
         )
 
     # Gate 2: manual override -- holds the user's position against comfort gates

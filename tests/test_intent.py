@@ -11,6 +11,7 @@ from custom_components.solar_cover.const import (
     Intent,
     ReasonCode,
     TiltRange,
+    WeatherAction,
 )
 from custom_components.solar_cover.intent import (
     IntentInput,
@@ -121,6 +122,70 @@ class TestWeatherGate:
         # raining=False, no wind/temp data -- weather gate passes
         intent = evaluate_intent(base_input).intent
         assert intent != Intent.INACTIVE_WEATHER
+
+
+class TestWeatherAction:
+    """Per-zone response to the weather-safety gate."""
+
+    def test_default_retract_reason_text(self, base_input: IntentInput) -> None:
+        inp = IntentInput(**{**base_input.__dict__, "raining": True})
+        result = evaluate_intent(inp)
+        assert result.intent == Intent.INACTIVE_WEATHER
+        assert result.reason.startswith("Retracted (weather):")
+
+    def test_explicit_retract_reason_text(self, base_input: IntentInput) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "raining": True,
+                "weather_action": WeatherAction.RETRACT,
+            }
+        )
+        result = evaluate_intent(inp)
+        assert result.intent == Intent.INACTIVE_WEATHER
+        assert result.reason.startswith("Retracted (weather):")
+
+    def test_close_reason_text(self, base_input: IntentInput) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "raining": True,
+                "weather_action": WeatherAction.CLOSE,
+            }
+        )
+        result = evaluate_intent(inp)
+        assert result.intent == Intent.INACTIVE_WEATHER
+        assert result.reason.startswith("Closed (weather):")
+
+    def test_ignore_skips_gate_despite_rain(self, base_input: IntentInput) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "raining": True,
+                "weather_action": WeatherAction.IGNORE,
+            }
+        )
+        result = evaluate_intent(inp)
+        assert result.intent != Intent.INACTIVE_WEATHER
+        assert result.triggers == [] or all(
+            t.code != ReasonCode.WEATHER_RAIN for t in result.triggers
+        )
+
+    def test_ignore_skips_gate_despite_wind_and_cold(
+        self, base_input: IntentInput
+    ) -> None:
+        inp = IntentInput(
+            **{
+                **base_input.__dict__,
+                "wind_speed": 50.0,
+                "wind_threshold": 10.0,
+                "outdoor_temp": -5.0,
+                "min_temp": 5.0,
+                "weather_action": WeatherAction.IGNORE,
+            }
+        )
+        result = evaluate_intent(inp)
+        assert result.intent != Intent.INACTIVE_WEATHER
 
 
 class TestOvercastGate:

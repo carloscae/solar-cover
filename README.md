@@ -98,6 +98,7 @@ Stand inside your room and face the window directly. Open the compass app on you
 | **Minimum sun height** | The sun must be at least this many degrees above the horizon before covers deploy. Pre-filled automatically from your location. Lower values mean earlier morning and later afternoon coverage. |
 | **Minimum shading position** | The cover will never go below this position while shading. Set to 30% to always keep some daylight in. |
 | **Maximum shading position** | The cover will never go above this position. Set to 80% if you always want some view through the window. |
+| **Weather response** | What this zone does when rain, wind, or cold is detected: **Retract** (open, e.g. a terrace awning), **Close** (protect the glass, e.g. a shutter), or **Ignore** (this zone is unaffected by weather). Default: Retract. |
 
 **Roller blinds and shutters**
 
@@ -172,11 +173,11 @@ The **Active intent** sensor always shows you exactly what Solar Cover is doing 
 | **Shading** | Sun is hitting the window — covers are actively positioned to block it |
 | **Sun too low** | The sun is below the minimum height threshold. No glare risk. Covers are at rest position. |
 | **Sun outside window** | The sun is not in front of this window right now. Covers are at rest position. |
-| **Retracted - weather** | Covers are held open due to rain, wind, or cold temperature |
+| **Weather safety** | Rain, wind, or cold temperature triggered this zone's configured **Weather response** (retract or close) |
 | **Retracted - overcast** | Cloud coverage or low radiation means there is no meaningful sunlight to block |
 | **Manual override** | You moved a cover by hand recently. Automation is paused until the override timer runs out. |
 
-The intent state tells you the *category*; the cover's **`reason`** and **`reason_detail`** attributes (above) tell you the *specifics* - which exact condition fired and by how much. So "Retracted - weather" becomes "wind 45 km/h exceeds 40 km/h limit", and you can see at a glance whether to raise your wind threshold or leave it.
+The intent state tells you the *category*; the cover's **`reason`** and **`reason_detail`** attributes (above) tell you the *specifics* - which exact condition fired, whether the response was to retract or close, and by how much. So "Weather safety" becomes "Retracted (weather): wind 45 km/h exceeds 40 km/h limit" (or "Closed (weather): ..." for a zone set to close), and you can see at a glance whether to raise your wind threshold or leave it. A zone whose weather response is set to **Ignore** never shows this state at all.
 
 ---
 
@@ -184,7 +185,7 @@ The intent state tells you the *category*; the cover's **`reason`** and **`reaso
 
 Solar Cover checks a series of conditions in order. The first one that triggers stops the process:
 
-1. **Is the weather safe?** Rain, strong wind, or cold temperature retracts covers. This is checked first so safety always wins, even over a manual override.
+1. **Is the weather safe?** Rain, strong wind, or cold temperature triggers this zone's **Weather response** (retract, close, or ignore). This is checked first so safety always wins, even over a manual override. The response is applied once per weather episode - if you move a cover by hand afterwards, it holds your position for the rest of the episode instead of being fought every cycle.
 2. **Did you move it manually?** If so, automation holds your position and pauses the comfort checks below until the override timer runs out.
 3. **Is the sun high enough?** Below the minimum elevation angle, no shading needed.
 4. **Is the sun facing this window?** If the sun is behind the house or outside the field of view, no shading needed.

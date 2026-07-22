@@ -28,6 +28,7 @@ CONF_AZIMUTH = "azimuth"
 CONF_FOV_LEFT = "fov_left"
 CONF_FOV_RIGHT = "fov_right"
 CONF_ELEVATION_THRESHOLD = "elevation_threshold"
+CONF_WEATHER_ACTION = "weather_action"
 CONF_INACTIVE_POSITION_OVERRIDE = "inactive_position_override"
 
 # Vertical blind geometry
@@ -62,6 +63,19 @@ class TiltRange(StrEnum):
     BIDIRECTIONAL = "bidirectional"
 
 
+class WeatherAction(StrEnum):
+    """A zone's response when the weather-safety gate is active.
+
+    RETRACT and CLOSE both still command a position once per weather episode
+    (see coordinator._async_update_data); IGNORE skips the weather gate for
+    this zone entirely, as if no weather entity were configured.
+    """
+
+    RETRACT = "retract"
+    CLOSE = "close"
+    IGNORE = "ignore"
+
+
 class Intent(StrEnum):
     SHADING = "shading"
     INACTIVE_SUN_LOW = "inactive_sun_low"
@@ -92,6 +106,8 @@ class ReasonCode(StrEnum):
 
 DEFAULT_INACTIVE_POSITION: int = 0
 DEFAULT_OVERRIDE_DURATION: int = 120
+DEFAULT_WEATHER_ACTION: WeatherAction = WeatherAction.RETRACT
+WEATHER_CLOSE_POSITION: float = 100.0
 DEFAULT_HYSTERESIS: float = 3.0
 DEFAULT_STABILITY_DELAY: int = 0
 DEFAULT_ELEVATION_THRESHOLD_FACTOR: float = 0.6

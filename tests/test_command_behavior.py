@@ -12,7 +12,11 @@ import pytest
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.solar_cover.const import Intent
+from custom_components.solar_cover.const import (
+    CONF_WEATHER_ACTION,
+    Intent,
+    WeatherAction,
+)
 from custom_components.solar_cover.coordinator import SolarCoverCoordinator
 from custom_components.solar_cover.intent import IntentResult
 
@@ -376,6 +380,160 @@ class TestInactiveHoldSticky:
             await coord._async_update_data()
 
         assert coord.hass.services.async_call.await_count == 1
+        assert coord.hass.services.async_call.call_args.args[2]["position"] == 0
+        assert coord._last_commanded["cover.test"] == 0.0
+
+
+class TestWeatherAssertedOncePerEpisode:
+    """The weather-safety position must be applied once on entry into
+    INACTIVE_WEATHER, then leave the cover alone for the rest of the episode --
+    a manual move made mid-warning must not be fought every refresh, and must
+    survive its own override timer lapsing while weather is still active."""
+
+    @staticmethod
+    def _wire_solar(coord: SolarCoverCoordinator) -> None:
+        coord._solar.sun_position = MagicMock(return_value=(180.0, 45.0))
+        coord._solar.hourly_curve = MagicMock(return_value=[])
+        coord._solar.fov_window = MagicMock(return_value=(None, None))
+
+    @pytest.mark.asyncio
+    async def test_manual_move_mid_episode_is_not_refought(self) -> None:
+        coord = _make_coordinator()  # stability delay defaults to 0
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+
+            # Rain starts -- retract for safety, once.
+            await coord._async_update_data()
+            assert coord.hass.services.async_call.await_count == 1
+            assert coord._last_commanded["cover.test"] == 0.0
+
+            # The user manually closes the shutter to protect the glass. This
+            # simulates what the external-move handler would have recorded.
+            coord._manual_position["cover.test"] = 100.0
+            coord._manual_override_until["cover.test"] = _T0 + timedelta(hours=2)
+            coord._last_commanded["cover.test"] = 100.0
+
+            # Still raining, intent unchanged -- must NOT re-command back to 0.
+            await coord._async_update_data()
+            assert coord.hass.services.async_call.await_count == 1
+            assert coord._last_commanded["cover.test"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_manual_move_survives_override_timer_lapse_during_episode(
+        self,
+    ) -> None:
+        coord = _make_coordinator()
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        coord._last_intent = Intent.INACTIVE_WEATHER  # already committed
+        coord._last_commanded = {"cover.test": 100.0}
+        coord._manual_position = {"cover.test": 100.0}
+        # Hold already expired, but weather is still active and unchanged.
+        coord._manual_override_until = {"cover.test": _T0 - timedelta(minutes=1)}
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+            await coord._async_update_data()
+
+        assert coord.hass.services.async_call.await_count == 0
+        assert coord._last_commanded["cover.test"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_new_episode_reasserts_after_weather_clears(self) -> None:
+        coord = _make_coordinator()
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        results = [
+            IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+            IntentResult(Intent.SHADING, 50.0, "shading", []),
+            IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+        ]
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                side_effect=results,
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+
+            await coord._async_update_data()  # episode 1: retract to 0
+            assert coord._last_commanded["cover.test"] == 0.0
+
+            await coord._async_update_data()  # weather clears, shading takes over
+            assert coord._last_commanded["cover.test"] == 50.0
+
+            await coord._async_update_data()  # episode 2: retract again
+            assert coord._last_commanded["cover.test"] == 0.0
+            assert coord.hass.services.async_call.await_count == 3
+
+
+class TestWeatherActionPerZone:
+    @staticmethod
+    def _wire_solar(coord: SolarCoverCoordinator) -> None:
+        coord._solar.sun_position = MagicMock(return_value=(180.0, 45.0))
+        coord._solar.hourly_curve = MagicMock(return_value=[])
+        coord._solar.fov_window = MagicMock(return_value=(None, None))
+
+    @pytest.mark.asyncio
+    async def test_close_action_targets_100(self) -> None:
+        coord = _make_coordinator()
+        coord._zone[CONF_WEATHER_ACTION] = WeatherAction.CLOSE
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+            await coord._async_update_data()
+
+        assert coord.hass.services.async_call.call_args.args[2]["position"] == 100
+        assert coord._last_commanded["cover.test"] == 100.0
+
+    @pytest.mark.asyncio
+    async def test_retract_action_targets_inactive_position(self) -> None:
+        coord = _make_coordinator()
+        coord._zone[CONF_WEATHER_ACTION] = WeatherAction.RETRACT
+        self._wire_solar(coord)
+        coord.hass.states.get = MagicMock(return_value=None)
+        coord.hass.services.async_call = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.solar_cover.coordinator.evaluate_intent",
+                return_value=IntentResult(Intent.INACTIVE_WEATHER, None, "weather", []),
+            ),
+            patch("custom_components.solar_cover.coordinator.datetime") as mock_dt,
+        ):
+            mock_dt.now.return_value = _T0
+            await coord._async_update_data()
+
         assert coord.hass.services.async_call.call_args.args[2]["position"] == 0
         assert coord._last_commanded["cover.test"] == 0.0
 

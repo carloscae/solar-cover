@@ -59,12 +59,15 @@
           "glare_depth": "How far into the room to shade",
           "min_position": "Minimum shading position",
           "max_position": "Maximum shading position",
+          "weather_action": "Weather response",
           "attach_height": "Height of awning rail above floor",
           "awn_length": "Maximum reach when fully extended",
           "awn_angle": "Awning slope angle",
           "slat_width": "Slat width",
           "slat_spacing": "Gap between slats",
-          "tilt_range": "Tilt range"
+          "tilt_range": "Tilt range",
+          "inactive_position_override": "Rest position (override, advanced)",
+          "override_duration_override": "Manual override duration (override, advanced)"
         },
         "data_description": {
           "azimuth": "The compass direction your window faces (0 = North, 90 = East, 180 = South, 270 = West).",
@@ -75,12 +78,15 @@
           "glare_depth": "For blinds: how far into the room to keep free of direct sunlight, in metres. For awnings: how far out onto the terrace the shadow should reach, in metres.",
           "min_position": "The cover will never go below this position while shading. Set to 30% to always keep some daylight in.",
           "max_position": "The cover will never go above this position while shading. Set to 80% to always keep some view.",
+          "weather_action": "What this zone does when rain, wind, or cold is detected. Retract: open for safety (e.g. an awning). Close: close for safety (e.g. a shutter protecting glass). Ignore: this zone is unaffected by weather.",
           "attach_height": "How high above the floor the awning rail is mounted, in metres.",
           "awn_length": "How far out the awning extends when fully open, measured horizontally in metres.",
           "awn_angle": "The downward tilt angle of the awning from horizontal, in degrees. Typical: 10-20°.",
           "slat_width": "The width of each individual slat, in millimetres.",
           "slat_spacing": "The distance from the center of one slat to the next, in millimetres. Must not exceed slat width.",
-          "tilt_range": "Single: slats tilt from fully open to fully closed (0-90°). Bidirectional: slats can also tilt the other direction."
+          "tilt_range": "Single: slats tilt from fully open to fully closed (0-90°). Bidirectional: slats can also tilt the other direction.",
+          "inactive_position_override": "Overrides the global rest position for this zone only. Leave empty to use the global setting.",
+          "override_duration_override": "Overrides the global manual-override duration for this zone only. Leave empty to use the global setting."
         }
       }
     },
@@ -119,7 +125,10 @@
           "window_height": "Window height",
           "glare_depth": "How far into the room to shade",
           "min_position": "Minimum shading position",
-          "max_position": "Maximum shading position"
+          "max_position": "Maximum shading position",
+          "weather_action": "Weather response",
+          "inactive_position_override": "Rest position (override, advanced)",
+          "override_duration_override": "Manual override duration (override, advanced)"
         },
         "data_description": {
           "weather_entity": "Used to detect rain and wind. Leave empty to skip weather checks.",
@@ -144,7 +153,10 @@
           "window_height": "Floor-to-ceiling height of the glazed area in metres.",
           "glare_depth": "How far into the room you want to keep shaded (metres).",
           "min_position": "The cover will never go below this position while shading. Set to 30% to always keep some daylight in.",
-          "max_position": "The cover will never go above this position while shading. Set to 80% if you always want some view through the window."
+          "max_position": "The cover will never go above this position while shading. Set to 80% if you always want some view through the window.",
+          "weather_action": "What this zone does when rain, wind, or cold is detected. Retract: open for safety (e.g. an awning). Close: close for safety (e.g. a shutter protecting glass). Ignore: this zone is unaffected by weather.",
+          "inactive_position_override": "Overrides the global rest position for this zone only. Leave empty to use the global setting.",
+          "override_duration_override": "Overrides the global manual-override duration for this zone only. Leave empty to use the global setting."
         }
       },
       "geometry_vertical": {
@@ -197,6 +209,28 @@
       "fov_out_of_range": "Field of view must be 1-90 deg for vertical and tilt covers (up to 180 deg for horizontal awnings)."
     }
   },
+  "selector": {
+    "cover_type": {
+      "options": {
+        "vertical": "Roller blind / shutter",
+        "horizontal": "Awning",
+        "tilt": "Venetian blind"
+      }
+    },
+    "tilt_range": {
+      "options": {
+        "single": "Single direction",
+        "bidirectional": "Bidirectional"
+      }
+    },
+    "weather_action": {
+      "options": {
+        "retract": "Retract (open)",
+        "close": "Close",
+        "ignore": "Ignore"
+      }
+    }
+  },
   "entity": {
     "switch": {
       "automation_enabled": {
@@ -218,7 +252,7 @@
           "shading": "Shading",
           "inactive_sun_low": "Sun too low",
           "inactive_outside_fov": "Sun outside window",
-          "inactive_weather": "Retracted - weather",
+          "inactive_weather": "Weather safety",
           "inactive_overcast": "Retracted - overcast",
           "manual_override": "Manual override"
         }
@@ -229,7 +263,7 @@
           "shading": "Shading",
           "inactive_sun_low": "Sun too low",
           "inactive_outside_fov": "Sun outside window",
-          "inactive_weather": "Retracted - weather",
+          "inactive_weather": "Weather safety",
           "inactive_overcast": "Retracted - overcast",
           "manual_override": "Manual override"
         }

@@ -22,20 +22,24 @@ from custom_components.solar_cover.const import (
     CONF_FOV_RIGHT,
     CONF_GLARE_DEPTH,
     CONF_HYSTERESIS,
+    CONF_INACTIVE_POSITION_OVERRIDE,
     CONF_MAX_POSITION,
     CONF_MIN_POSITION,
+    CONF_OVERRIDE_DURATION_OVERRIDE,
     CONF_SLAT_SPACING,
     CONF_SLAT_WIDTH,
     CONF_STABILITY_DELAY,
     CONF_STABILITY_DELAY_ON_RECOVERY,
     CONF_STABILITY_DELAY_ON_WORSENING,
     CONF_TILT_RANGE,
+    CONF_WEATHER_ACTION,
     CONF_WINDOW_HEIGHT,
     DOMAIN,
     ENTRY_TYPE_INTEGRATION,
     ENTRY_TYPE_ZONE,
     CoverType,
     TiltRange,
+    WeatherAction,
 )
 
 # Step 1: name, entities, cover type
@@ -473,6 +477,102 @@ class TestZoneConfigureStep:
         assert result3["type"] == FlowResultType.CREATE_ENTRY
         assert result3["data"][CONF_HYSTERESIS] == 5.0
 
+    async def test_weather_action_defaults_to_retract(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        with patch(
+            "custom_components.solar_cover.coordinator.SolarCoverCoordinator"
+            ".async_config_entry_first_refresh",
+            return_value=None,
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": "user"}
+            )
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+            )
+            result3 = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP2_VERTICAL
+            )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_WEATHER_ACTION] == WeatherAction.RETRACT
+
+    async def test_weather_action_close_round_trips(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        with patch(
+            "custom_components.solar_cover.coordinator.SolarCoverCoordinator"
+            ".async_config_entry_first_refresh",
+            return_value=None,
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": "user"}
+            )
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+            )
+            result3 = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                user_input={**ZONE_STEP2_VERTICAL, CONF_WEATHER_ACTION: "close"},
+            )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_WEATHER_ACTION] == WeatherAction.CLOSE
+
+    async def test_override_fields_unset_by_default(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        with patch(
+            "custom_components.solar_cover.coordinator.SolarCoverCoordinator"
+            ".async_config_entry_first_refresh",
+            return_value=None,
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": "user"}
+            )
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+            )
+            result3 = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP2_VERTICAL
+            )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert CONF_INACTIVE_POSITION_OVERRIDE not in result3["data"]
+        assert CONF_OVERRIDE_DURATION_OVERRIDE not in result3["data"]
+
+    async def test_override_fields_round_trip(
+        self, hass: HomeAssistant, integration_entry: MockConfigEntry
+    ) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        with patch(
+            "custom_components.solar_cover.coordinator.SolarCoverCoordinator"
+            ".async_config_entry_first_refresh",
+            return_value=None,
+        ):
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": "user"}
+            )
+            await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input=ZONE_STEP1_VERTICAL
+            )
+            result3 = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                user_input={
+                    **ZONE_STEP2_VERTICAL,
+                    CONF_INACTIVE_POSITION_OVERRIDE: 40,
+                    CONF_OVERRIDE_DURATION_OVERRIDE: 60,
+                },
+            )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_INACTIVE_POSITION_OVERRIDE] == 40
+        assert result3["data"][CONF_OVERRIDE_DURATION_OVERRIDE] == 60
+
     async def test_zone_hysteresis_unset_by_default(
         self, hass: HomeAssistant, integration_entry: MockConfigEntry
     ) -> None:
@@ -748,6 +848,49 @@ class TestZoneOptionsFlow:
         }
         assert suggested.get(CONF_SLAT_SPACING) == 70
         assert suggested.get(CONF_SLAT_WIDTH) == 50
+
+    async def test_weather_action_round_trip(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.VERTICAL)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                **_ZONE_OPTIONS_INIT,
+                CONF_COVER_TYPE: CoverType.VERTICAL,
+                CONF_WEATHER_ACTION: "close",
+            },
+        )
+        assert result2["step_id"] == "geometry_vertical"
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={CONF_WINDOW_HEIGHT: 3.0, CONF_GLARE_DEPTH: 1.5},
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_WEATHER_ACTION] == WeatherAction.CLOSE
+
+    async def test_override_fields_round_trip(self, hass: HomeAssistant) -> None:
+        from homeassistant.data_entry_flow import FlowResultType
+
+        zone = _zone_entry(hass, CoverType.VERTICAL)
+        result = await hass.config_entries.options.async_init(zone.entry_id)
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            user_input={
+                **_ZONE_OPTIONS_INIT,
+                CONF_COVER_TYPE: CoverType.VERTICAL,
+                CONF_INACTIVE_POSITION_OVERRIDE: 25,
+                CONF_OVERRIDE_DURATION_OVERRIDE: 45,
+            },
+        )
+        result3 = await hass.config_entries.options.async_configure(
+            result2["flow_id"],
+            user_input={CONF_WINDOW_HEIGHT: 3.0, CONF_GLARE_DEPTH: 1.5},
+        )
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"][CONF_INACTIVE_POSITION_OVERRIDE] == 25
+        assert result3["data"][CONF_OVERRIDE_DURATION_OVERRIDE] == 45
 
     async def test_hysteresis_round_trip(self, hass: HomeAssistant) -> None:
         from homeassistant.data_entry_flow import FlowResultType
