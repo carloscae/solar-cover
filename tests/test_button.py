@@ -11,7 +11,8 @@ from custom_components.solar_cover.button import (  # noqa: E402
     SolarCoverResetCoverButton,
     SolarCoverResetTimersButton,
 )
-from custom_components.solar_cover.const import DOMAIN  # noqa: E402
+from custom_components.solar_cover.const import DOMAIN, Intent  # noqa: E402
+from custom_components.solar_cover.coordinator import CoverSnapshot  # noqa: E402
 
 
 def _make_button() -> tuple[SolarCoverResetTimersButton, MagicMock]:
@@ -44,6 +45,16 @@ class TestResetTimersButton:
         coordinator.async_request_refresh = AsyncMock()
         await button.async_press()
         coordinator.async_request_refresh.assert_awaited_once_with()
+
+    def test_extra_state_attributes_reports_zone_intent(self) -> None:
+        button, coordinator = _make_button()
+        coordinator.data.intent = Intent.SHADING
+        assert button.extra_state_attributes == {"intent": "shading"}
+
+    def test_extra_state_attributes_none_before_first_refresh(self) -> None:
+        button, coordinator = _make_button()
+        coordinator.data = None
+        assert button.extra_state_attributes is None
 
 
 def _make_cover_button() -> tuple[SolarCoverResetCoverButton, MagicMock]:
@@ -84,3 +95,24 @@ class TestResetCoverButton:
         button, coordinator = _make_cover_button()
         await button.async_press()
         coordinator.async_request_refresh.assert_awaited_once_with()
+
+    def test_extra_state_attributes_reports_this_covers_intent(self) -> None:
+        button, coordinator = _make_cover_button()
+        coordinator.data.covers = {
+            "cover.living_a": CoverSnapshot(
+                commanded_position=50.0,
+                manual_override_until="2026-01-01T00:00:00+00:00",
+                intent=Intent.MANUAL_OVERRIDE,
+            )
+        }
+        assert button.extra_state_attributes == {"intent": "manual_override"}
+
+    def test_extra_state_attributes_none_when_cover_not_in_snapshot(self) -> None:
+        button, coordinator = _make_cover_button()
+        coordinator.data.covers = {}
+        assert button.extra_state_attributes is None
+
+    def test_extra_state_attributes_none_before_first_refresh(self) -> None:
+        button, coordinator = _make_cover_button()
+        coordinator.data = None
+        assert button.extra_state_attributes is None

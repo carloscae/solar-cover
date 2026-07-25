@@ -649,3 +649,58 @@ class TestExternalMoveTiltAxis:
         )
         assert coord._manual_override_until == {}
         assert coord._manual_position == {}
+
+
+class TestInTransitEchoDetection:
+    """A coordinator-issued command (e.g. a reset re-asserting the automatic
+    target after a stale manual hold) must not have its own in-flight echoes
+    misread as a manual countermand on covers that never report "opening"/
+    "closing" mid-move -- see _command_origin in coordinator.py."""
+
+    @staticmethod
+    def _event(entity_id: str, position: float) -> MagicMock:
+        state = MagicMock()
+        state.state = "open"  # no opening/closing transition reported
+        state.attributes = {"current_position": position}
+        event = MagicMock()
+        event.data = {"entity_id": entity_id, "new_state": state}
+        return event
+
+    @pytest.mark.asyncio
+    async def test_midtravel_echo_toward_target_does_not_arm_override(self) -> None:
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock()
+        coord._last_commanded = {"cover.test": 80.0}
+
+        await coord._command_covers({"cover.test": 43.0})
+        coord._handle_cover_state_change(self._event("cover.test", 60.0))
+
+        assert coord._manual_override_until == {}
+        assert coord._manual_position == {}
+        # Debounce window is extended, same treatment as opening/closing.
+        assert coord._last_command_time["cover.test"] is not None
+
+    @pytest.mark.asyncio
+    async def test_echo_past_origin_outside_band_still_arms_override(self) -> None:
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock()
+        coord._last_commanded = {"cover.test": 80.0}
+
+        await coord._command_covers({"cover.test": 43.0})
+        # 95 is outside [43, 80] even with hysteresis slack -- a genuine
+        # countermand in the opposite direction, must still arm immediately.
+        coord._handle_cover_state_change(self._event("cover.test", 95.0))
+
+        assert coord._manual_override_until["cover.test"] is not None
+        assert coord._manual_position["cover.test"] == pytest.approx(95.0)
+
+    @pytest.mark.asyncio
+    async def test_echo_at_final_target_still_settles_normally(self) -> None:
+        coord = _make_coordinator()
+        coord.hass.services.async_call = AsyncMock()
+        coord._last_commanded = {"cover.test": 80.0}
+
+        await coord._command_covers({"cover.test": 43.0})
+        coord._handle_cover_state_change(self._event("cover.test", 43.0))
+
+        assert coord._manual_override_until == {}

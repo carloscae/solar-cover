@@ -253,6 +253,11 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Per cover: answers "did we recently command THIS cover?" A shared stamp
         # would open a false debounce window on an uncommanded sibling.
         self._last_command_time: dict[str, datetime] = {}
+        # Per cover: the position it was at right before the most recent
+        # command, so an in-flight echo can be recognised as "still travelling
+        # toward our own target" even on covers that never report opening/
+        # closing state mid-move (see _handle_cover_state_change).
+        self._command_origin: dict[str, float | None] = {}
         self._store: Store[dict[str, Any]] = _SolarCoverStore(
             hass, 2, f"solar_cover.{entry_id}"
         )
@@ -747,6 +752,7 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
         prev_commanded: dict[str, float | None] = {}
         for eid, target in targets.items():
             prev_commanded[eid] = self._last_commanded.get(eid)
+            self._command_origin[eid] = prev_commanded[eid]
             self._last_commanded[eid] = target
             self._last_command_time[eid] = now
 
@@ -867,6 +873,25 @@ class SolarCoverCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         hysteresis = self._hysteresis()
         last = self._last_commanded.get(eid)
+
+        # Still travelling toward our own commanded target: some covers (e.g.
+        # optimistic or fast-polling entities) never report "opening"/"closing"
+        # mid-move, they just tick current_position toward the target while
+        # staying in a resting state. Without this, a large coordinator-issued
+        # jump (a reset re-asserting the automatic target after a stale manual
+        # hold is the most common trigger, since it is often a big jump) would
+        # have its own in-flight echoes misread as a manual countermand well
+        # before the cover finishes moving. Only positions between where the
+        # cover started and where we told it to go are treated this way; a
+        # report outside that band is still evaluated as a possible countermand.
+        if in_debounce and last is not None:
+            origin = self._command_origin.get(eid)
+            if origin is not None:
+                lo, hi = (origin, last) if origin <= last else (last, origin)
+                if lo - hysteresis <= new_pos <= hi + hysteresis:
+                    self._last_command_time[eid] = now
+                    return
+
         if last is None:
             # No baseline for this cover: adopt any move outside the debounce.
             if in_debounce:
